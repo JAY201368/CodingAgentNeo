@@ -1,0 +1,5 @@
+temp/
+.env
+.DS_Store
+
+docs/temp/
