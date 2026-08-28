@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户审阅；T01、T02、T03、T04 已接受
+> 状态：已于 2026-08-28 通过用户审阅；T01、T02、T03、T04、T05 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T04 已完成，本轮未授权继续派发后续任务。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T05 已完成，本轮未授权继续派发后续任务。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -104,7 +104,7 @@ flowchart TD
 
 **完成摘要（2026-08-28）:** 已交付 `Tool` Protocol、JSON-compatible schema 与参数校验、registered/active 分离的 Registry、六个内置工具、后端无关 `ToolResult` 归一化以及模型/持久化头尾输出投影；工具只通过 `ToolExecutionContext.environment` 转发请求与 cancellation，不直接访问宿主文件或进程。主 Agent 验收时发现并退回修复了公开 schema API 可绕过 active set 的缺口，最终所有 schema 枚举/单项查询均只允许 active tools。Python 3.12.11 下定向测试 `14 passed`、全量 `44 passed`，Ruff lint/format、`python -m build`、workflow validator、禁止依赖静态扫描与 `git diff --check` 均通过；明确排除 T05 的策略/approval 生命周期、真实 Local 集成和 Agent Loop。
 
-### [ ] T05 — 交付 fail-closed 策略与完整工具执行生命周期
+### [x] T05 — 交付 fail-closed 策略与完整工具执行生命周期
 
 **依赖:** T04  
 **范围:** 实现默认 ExecutionPolicy、交互/非交互 approval 端口和 ToolExecutor；负责 correlation ID、校验、策略决定、异常捕获、事件发布和恰好一个 ToolResult。排除 CLI 渲染和 Agent 循环调度。  
@@ -116,6 +116,8 @@ flowchart TD
 - 未注册/未激活/参数错误、用户拒绝、工具普通失败和未预期工具异常都恰好返回一个模型可见 ToolResult 并记录事件。
 
 **验证:** `python -m pytest tests/unit/test_policy.py tests/unit/test_tool_executor.py tests/integration/test_tool_lifecycle.py`; `python -m ruff check src/coding_agent_neo/policy.py src/coding_agent_neo/executor.py tests`。
+
+**完成摘要（2026-08-28）:** 已交付 fail-closed `DefaultExecutionPolicy`、交互/非交互 approval port、`ToolExecutor` 单调用生命周期与可由 T06 适配的最小事件发布端口；覆盖安全相对路径 allow、bash ask/auto/yolo/deny、策略/审批异常拒绝、唯一内部 correlation ID、独立 provider ID、参数校验、拒绝/普通失败/意外异常归一化及每次调用恰好一个 `ToolResult`/`tool_result` 事件。主 Agent 对抗验收时退回修复了不受信任工具名/参数键/validator path 的诊断泄漏，以及 lifecycle event ID 绕过 Runtime ID factory 的问题。Python 3.12.11 下定向测试 `24 passed`、全量 `68 passed`，敏感哨兵与注入 ID 对抗脚本、Ruff lint/format、`python -m build`、workflow validator、依赖边界扫描与 `git diff --check` 均通过；未实现 T06 持久化/扇出、CLI、Agent Loop 或真实 Local 集成。
 
 ### [ ] T06 — 交付 append-only Session Store 与事件扇出
 

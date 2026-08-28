@@ -43,3 +43,9 @@
 - 选择：`ToolRegistry` 保存完整 registered set 与显式 active set；只有 active 工具生成 OpenAI-compatible function schemas 并允许 dispatch。六个内置工具共享后端无关请求/结果转换，参数协议错误在 Environment 调用前归一化为 `ToolResult(INVALID)`。
 - 理由与替代：注册与激活分离可让运行时按 Runtime 权限投影工具，同时避免未激活工具误执行；统一结果边界让模型看到未知工具、非法 JSON、缺字段、类型错误和 Environment 普通失败的同一结构，而不把异常穿透 Loop。未引入动态插件或真实 Local 依赖，符合首版边界。
 - 后果：模型/持久化输出均由同一 ToolResult 派生，超限保留头尾并记录 `original_length`；T05 可在 Registry 之上接入策略与执行生命周期，既有 Tool API 不直接承担 approval。
+
+## 2026-08-28 — T05 策略与事件发布保持 fail-closed、可适配
+
+- 选择：默认策略只对已验证且语法安全的 workspace 相对文件参数 allow，bash 按 ask/auto(yolo)/deny 决策；策略或 approval 异常统一 deny。`ToolExecutor` 为每次调用维持唯一内部 correlation ID，并通过不负责 sequence/持久化的最小 `ToolLifecycleEvent` 发布端口输出 `tool_call`、`policy_decision`、`tool_result`，事件 ID 使用 Runtime 的可注入 factory。
+- 理由与替代：路径真实边界仍必须由 Environment 最终执行；命令黑名单不能成为安全边界。T06 尚未实现，若 T05 提前拥有 sequence、JSONL 或订阅扇出会造成职责倒置；完全不发布事件又无法独立验证调用关联和审批轨迹。
+- 后果：T06 需把 lifecycle event 适配为分配 sequence 的 `EventEnvelope` 并负责扇出/持久化；T08 可直接复用同一 Executor。未注册名称、原始参数键和自定义 validator path 等不受信任诊断不得原样进入结果或事件。
