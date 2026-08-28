@@ -1,8 +1,4 @@
-"""Execution-environment contracts.
-
-Concrete local and container implementations are intentionally supplied by
-later tasks; importing this package only exposes backend-neutral contracts.
-"""
+"""Execution-environment contracts and the local backend."""
 
 from coding_agent_neo.environment.base import (
     CommandRequest,
@@ -24,6 +20,7 @@ from coding_agent_neo.environment.base import (
     WriteFileRequest,
     WriteFileResult,
 )
+from coding_agent_neo.environment.local import LocalEnvironment, LocalExecutionEnvironment
 
 __all__ = [
     "CommandRequest",
@@ -44,4 +41,6 @@ __all__ = [
     "SearchResult",
     "WriteFileRequest",
     "WriteFileResult",
+    "LocalEnvironment",
+    "LocalExecutionEnvironment",
 ]

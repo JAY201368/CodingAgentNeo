@@ -31,3 +31,15 @@
 - 选择：对内部 `AgentId`、`SessionId`、`EventId` 和 `CorrelationId` 使用可验证的字符串子类型；`ProviderToolCallId` 单独作为不透明外部字符串，仅拒绝空值、NUL 和非字符串并原样保留。`EventEnvelope` 将时间戳规范化为带 `Z` 的 UTC ISO 8601 字符串，并通过显式 ID factory/clock 提供测试注入点。六类环境请求/结果只表达逻辑路径、命令、限制和结构化状态，具体后端不进入模型。
 - 理由与替代：字符串运行时兼容 JSONL，同时为 agent 归属和内部调用链保留可审查的类型边界；厂商 ID 的格式由兼容网关决定，不能套用内部字符集规则。直接暴露 `datetime`、宿主绝对路径或 Docker 元数据会增加序列化和后端耦合。时间/内部 ID 默认实现无共享可变状态，测试可使用确定性来源。
 - 后果：后续 Session/Event 持久化可直接使用 `EventEnvelope.to_dict()`；Local 或 Docker 实现只能解释这些逻辑请求并返回统一结果，不能改变 Tool/Loop 的公开模型。
+
+## 2026-08-28 — T03 LocalEnvironment 的搜索退化与边界语义
+
+- 选择：`LocalExecutionEnvironment` 启动时检测 `rg`；若不可用或在调用间消失，`search` 使用明确标注 `engine=stdlib`、`fallback=python` 的标准库退化实现。递归 list/search 跳过解析到 workspace 外的 symlink，且所有请求路径均拒绝绝对路径、`..` 和 Windows drive 路径。
+- 理由与替代：`rg` 是可选依赖，标准库退化可保持搜索可用且不把“无结果”误报为空成功；真实路径检查和不跟随外部链接可避免逻辑路径绕过。拒绝外链条目比仅列出链接名更便于调用方安全解析返回路径。
+- 后果：搜索结果携带引擎/退化元数据；文件/列表/搜索/命令输出均有明确截断标记和原始长度；Local shell 仅保证初始 cwd 在 workspace，仍继承宿主用户权限，不提供沙箱隔离。
+
+## 2026-08-28 — T04 工具注册激活与输出投影边界
+
+- 选择：`ToolRegistry` 保存完整 registered set 与显式 active set；只有 active 工具生成 OpenAI-compatible function schemas 并允许 dispatch。六个内置工具共享后端无关请求/结果转换，参数协议错误在 Environment 调用前归一化为 `ToolResult(INVALID)`。
+- 理由与替代：注册与激活分离可让运行时按 Runtime 权限投影工具，同时避免未激活工具误执行；统一结果边界让模型看到未知工具、非法 JSON、缺字段、类型错误和 Environment 普通失败的同一结构，而不把异常穿透 Loop。未引入动态插件或真实 Local 依赖，符合首版边界。
+- 后果：模型/持久化输出均由同一 ToolResult 派生，超限保留头尾并记录 `original_length`；T05 可在 Registry 之上接入策略与执行生命周期，既有 Tool API 不直接承担 approval。

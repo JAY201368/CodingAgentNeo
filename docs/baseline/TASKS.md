@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户审阅；T01、T02 已接受
+> 状态：已于 2026-08-28 通过用户审阅；T01、T02、T03、T04 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T02 已完成，本轮未授权继续派发后续任务。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T04 已完成，本轮未授权继续派发后续任务。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -74,7 +74,7 @@ flowchart TD
 
 ## 阶段 B：执行、工具、持久化与模型组件
 
-### [ ] T03 — 交付受 workspace 约束的 LocalExecutionEnvironment
+### [x] T03 — 交付受 workspace 约束的 LocalExecutionEnvironment
 
 **依赖:** T02  
 **范围:** 实现 LocalEnvironment 生命周期、read/list/search/write/edit/run_command 六类操作、路径解析、结果限制、`rg` 检测/退化、取消和超时。排除 Tool schema、approval UI、Docker 和命令黑名单。  
@@ -87,7 +87,9 @@ flowchart TD
 
 **验证:** `python -m pytest tests/unit/environment/test_local_environment.py tests/security/test_workspace_boundary.py`; `python -m ruff check src/coding_agent_neo/environment tests/unit/environment tests/security`。
 
-### [ ] T04 — 交付注册/激活分离的内置工具系统
+**完成摘要（2026-08-28）:** 已交付 workspace 约束的 `LocalExecutionEnvironment`，覆盖生命周期、read/list/search/write/edit/run_command、真实路径与待创建父目录校验、symlink 逃逸拒绝、有界结构化结果、`rg` 检测与显式标准库退化，以及 cancel/timeout/close 进程回收；README 明确 Local shell 继承宿主用户权限而非 OS sandbox。主 Agent 验收时发现并退回修复了 POSIX shell leader 先退出时后台 descendant 未被回收的问题，独立复现确认 `0.1s` 超时约 `0.102s` 返回且延迟 marker 未产生。Python 3.12.11 下定向测试 `11 passed`、全量 `30 passed`，Ruff lint/format、`python -m build`、workflow validator 与 `git diff --check` 均通过；未在 Linux/Windows 上验证。
+
+### [x] T04 — 交付注册/激活分离的内置工具系统
 
 **依赖:** T02  
 **范围:** 实现 Tool Protocol、JSON schema 与参数校验、Registry/active tools、六个内置工具及统一 ToolResult/模型可见与持久化输出投影；所有副作用只调用 ToolExecutionContext.environment。排除策略询问、真实 Local 后端和 Agent Loop。  
@@ -99,6 +101,8 @@ flowchart TD
 - 每个工具 schema 可 JSON 序列化，名称稳定且与架构一致。
 
 **验证:** `python -m pytest tests/unit/tools/test_registry.py tests/unit/tools/test_builtin_tools.py tests/unit/tools/test_output_projection.py tests/architecture/test_forbidden_dependencies.py`; `python -m ruff check src/coding_agent_neo/tools tests/unit/tools`。
+
+**完成摘要（2026-08-28）:** 已交付 `Tool` Protocol、JSON-compatible schema 与参数校验、registered/active 分离的 Registry、六个内置工具、后端无关 `ToolResult` 归一化以及模型/持久化头尾输出投影；工具只通过 `ToolExecutionContext.environment` 转发请求与 cancellation，不直接访问宿主文件或进程。主 Agent 验收时发现并退回修复了公开 schema API 可绕过 active set 的缺口，最终所有 schema 枚举/单项查询均只允许 active tools。Python 3.12.11 下定向测试 `14 passed`、全量 `44 passed`，Ruff lint/format、`python -m build`、workflow validator、禁止依赖静态扫描与 `git diff --check` 均通过；明确排除 T05 的策略/approval 生命周期、真实 Local 集成和 Agent Loop。
 
 ### [ ] T05 — 交付 fail-closed 策略与完整工具执行生命周期
 
