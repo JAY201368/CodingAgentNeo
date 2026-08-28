@@ -1,0 +1,228 @@
+# CodingAgentNeo 任务分解
+
+> 状态：待用户审阅；所有任务均未开始  
+> 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
+
+本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
+
+## 协作规则
+
+- 用户确认本轮文档基线前，不得开始 T01。
+- 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
+- Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
+- 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
+- 只有全部验收项有实际证据且主 Agent 复核后，才可把 `[ ]` 改成 `[x]` 并追加日期、行为和真实验证结果。跳过或失败必须如实记录。
+
+## 依赖总览
+
+```mermaid
+flowchart TD
+    T01 --> T02
+    T01 --> T07
+    T02 --> T03
+    T02 --> T04
+    T02 --> T06
+    T04 --> T05
+    T03 --> T08
+    T05 --> T08
+    T06 --> T08
+    T07 --> T08
+    T08 --> T09
+    T03 --> T10
+    T05 --> T10
+    T06 --> T10
+    T07 --> T10
+    T09 --> T10
+    T06 --> T11
+    T09 --> T11
+    T10 --> T11
+    T11 --> T12
+    T12 --> T13
+```
+
+## 阶段 A：可验证的项目与运行契约
+
+### [ ] T01 — 建立可安装、可检查的 Python 项目骨架
+
+**依赖:** 无  
+**范围:** 创建 Python 3.12 `pyproject.toml`、`src/coding_agent_neo/` 与测试目录骨架、CLI 占位帮助入口、开发依赖、示例配置和 `.gitignore`；固化安装、lint、format-check、test、build 命令。仅建立基础设施，不实现 Agent、模型、工具或环境业务。  
+**验收:**
+
+- `python -m pip install -e ".[dev]"` 可在干净 Python 3.12 环境安装，且不需要 API Key。
+- `python -m coding_agent_neo --help` 和 `coding-agent-neo --help` 均返回 0，只展示已在架构定义的公共选项或清晰标注尚未实现的子能力。
+- 空项目的 Ruff、pytest 和 build 质量门均通过；构建产物、虚拟环境、本地配置、session 和凭据模式被忽略。
+- 示例配置不含真实凭据；README 开发说明不夸大尚未实现的功能。
+
+**验证:** `python -m pip install -e ".[dev]"`; `python -m ruff check .`; `python -m ruff format --check .`; `python -m pytest`; `python -m build`; `python -m coding_agent_neo --help`。
+
+### [ ] T02 — 固化 Runtime、Environment 与事件领域契约
+
+**依赖:** T01  
+**范围:** 实现后端无关数据模型、`AgentRuntime`/ContextState/BudgetTracker/CancellationSignal、ExecutionEnvironment Protocol、ToolExecutionContext、EventEnvelope 和 ID/时钟注入点；提供测试 fake environment。排除 Local I/O、JSONL、模型网络和 Agent Loop。  
+**验收:**
+
+- 两个 Runtime 默认不共享 context、预算、active tools、取消信号或 Environment 记录；root Runtime 也必须显式提供 agent/session/environment/policy。
+- EventEnvelope 强制 schema/session/event/agent/sequence/type/timestamp，并将 parent/correlation/provider ID 语义区分清楚。
+- Environment Protocol 覆盖 start/close 和六类操作，request/result 不包含 Local 或 Docker 专属字段。
+- 数据模型校验非法 ID、负预算、重复 mutable default 等边界并有单元测试。
+
+**验证:** `python -m pytest tests/unit/test_runtime.py tests/unit/test_models.py tests/unit/test_environment_contract.py`; `python -m ruff check .`; `python -m ruff format --check .`。
+
+## 阶段 B：执行、工具、持久化与模型组件
+
+### [ ] T03 — 交付受 workspace 约束的 LocalExecutionEnvironment
+
+**依赖:** T02  
+**范围:** 实现 LocalEnvironment 生命周期、read/list/search/write/edit/run_command 六类操作、路径解析、结果限制、`rg` 检测/退化、取消和超时。排除 Tool schema、approval UI、Docker 和命令黑名单。  
+**验收:**
+
+- 临时 workspace 内六类操作返回后端无关结构化结果；shell cwd、exit code、stdout/stderr、timeout 和 duration 可观察。
+- 绝对路径、`..`、现有 symlink 逃逸、待创建路径经 symlink 父目录逃逸均在副作用前拒绝。
+- edit 对旧文本不存在或不唯一返回普通失败且不改文件；list/search/read 有界，超限明确标记。
+- cancel、command timeout、close 后调用和缺少 `rg` 均有确定结果；不宣称 shell 被沙箱隔离。
+
+**验证:** `python -m pytest tests/unit/environment/test_local_environment.py tests/security/test_workspace_boundary.py`; `python -m ruff check src/coding_agent_neo/environment tests/unit/environment tests/security`。
+
+### [ ] T04 — 交付注册/激活分离的内置工具系统
+
+**依赖:** T02  
+**范围:** 实现 Tool Protocol、JSON schema 与参数校验、Registry/active tools、六个内置工具及统一 ToolResult/模型可见与持久化输出投影；所有副作用只调用 ToolExecutionContext.environment。排除策略询问、真实 Local 后端和 Agent Loop。  
+**验收:**
+
+- Registry 能注册全部工具，但 schema 只暴露 active tools；未知、未激活、非法 JSON、缺字段/类型错误产生结构化协议错误。
+- 六个工具在 fake environment 上把参数和 cancellation 正确传递并将成功/失败归一化；测试证明 Tool 模块不直接执行宿主机 I/O/进程。
+- ToolResult 保留 correlation/provider ID、status、文本、metadata、truncated、duration、exit/timeout/path；头尾截断报告原始长度。
+- 每个工具 schema 可 JSON 序列化，名称稳定且与架构一致。
+
+**验证:** `python -m pytest tests/unit/tools/test_registry.py tests/unit/tools/test_builtin_tools.py tests/unit/tools/test_output_projection.py tests/architecture/test_forbidden_dependencies.py`; `python -m ruff check src/coding_agent_neo/tools tests/unit/tools`。
+
+### [ ] T05 — 交付 fail-closed 策略与完整工具执行生命周期
+
+**依赖:** T04  
+**范围:** 实现默认 ExecutionPolicy、交互/非交互 approval 端口和 ToolExecutor；负责 correlation ID、校验、策略决定、异常捕获、事件发布和恰好一个 ToolResult。排除 CLI 渲染和 Agent 循环调度。  
+**验收:**
+
+- workspace 文件工具默认 allow、交互 bash ask、auto/yolo bash allow、越界/不安全参数 deny；策略抛异常时拒绝且不调用 Environment。
+- ask 的批准/拒绝均生成 policy_decision；非交互 ask 立即拒绝，不等待 stdin。
+- tool_call、policy_decision、tool_result 共享内部 correlation ID，provider ID 独立保留，不同调用不复用。
+- 未注册/未激活/参数错误、用户拒绝、工具普通失败和未预期工具异常都恰好返回一个模型可见 ToolResult 并记录事件。
+
+**验证:** `python -m pytest tests/unit/test_policy.py tests/unit/test_tool_executor.py tests/integration/test_tool_lifecycle.py`; `python -m ruff check src/coding_agent_neo/policy.py src/coding_agent_neo/executor.py tests`。
+
+### [ ] T06 — 交付 append-only Session Store 与事件扇出
+
+**依赖:** T02  
+**范围:** 实现 EventEmitter、Session Store 的统一 sequence 分配、JSONL append/flush/有界持久化、订阅扇出和安全序列化；可读取完整记录并诊断损坏尾行。排除上下文投影、CLI 展示和业务恢复。  
+**验收:**
+
+- 标准事件能写成每行一个 schema v1 JSON object；event ID 唯一、sequence 单调无重复、所有事件含 agent ID。
+- 每个关键 append 可被另一文件句柄立即读取；中途异常不会改写既有行。
+- 超大 payload 按 session 上限头尾截断并记录原始长度；厂商对象和 secret 字段不能未经处理进入文件。
+- 一个 emitter 可同时通知 Store 和 fake renderer；单个订阅者失败不伪造其他订阅者成功，处理语义有测试。
+- 尾部不完整行被定位和报告，之前的完整事件仍可读取。
+
+**验证:** `python -m pytest tests/unit/test_events.py tests/unit/test_session_store.py tests/security/test_event_redaction.py`; `python -m ruff check src/coding_agent_neo/events.py src/coding_agent_neo/session.py tests`。
+
+### [ ] T07 — 交付 OpenAI-compatible 模型访问与有界重试
+
+**依赖:** T01  
+**范围:** 实现 ModelClient 接口与 Chat Completions 适配器、请求构造、原生 tool calls/usage/finish reason 归一化、错误分类、退避策略和脱敏。使用 mock transport，不接入 Agent Loop 或 compaction 决策。  
+**验收:**
+
+- 标准 messages 和 active schemas 被传给客户端；零/单/多 tool call 按厂商顺序归一化，arguments 原文和 provider ID 保留。
+- 瞬时网络、429 和选定 5xx 有上限指数退避；认证/权限/模型/配置错误不重试；context overflow 被单独分类交给调用方。
+- 响应缺失/冲突 tool-call ID、非法 arguments 不使适配器崩溃，而以足够信息交由协议边界处理。
+- 测试日志、异常和归一化对象中无 API Key、Authorization 或请求头泄漏；不使用 Markdown/正则解析主要工具调用。
+
+**验证:** `python -m pytest tests/unit/model/test_openai_compatible.py tests/unit/model/test_retry.py tests/security/test_model_redaction.py`; `python -m ruff check src/coding_agent_neo/model_client.py tests/unit/model`。
+
+## 阶段 C：可运行核心闭环与上下文管理
+
+### [ ] T08 — 交付可独立实例化、有界的 Agent Loop
+
+**依赖:** T03, T05, T06, T07  
+**范围:** 通过显式 ModelClient、ToolRegistry、EventEmitter 和 AgentRuntime 实现 LLM→tools→results 循环、状态机、串行多调用、预算、协议错误上限、中断和异常结束。先使用简单未压缩 Context Builder；排除自动 compaction、CLI 与 session 恢复。  
+**验收:**
+
+- scripted fake model 能驱动 read/search/edit/bash、看到失败结果后修正，并以无 tool call assistant 文本完成；多调用严格保持声明顺序。
+- 每轮 user/assistant/tool/turn/error/agent/session 事件顺序、ID 和结果完整；普通工具失败不终止，未捕获系统异常尽力写结束事件并返回 FAILED。
+- model steps、tool calls、连续协议错误、墙钟和命令限制命中时给出具体 LIMIT_REACHED，不无限循环。
+- Ctrl+C/cancellation 产生 INTERRUPTED 并关闭 Environment；交互 turn 完成不等于 session 强制结束。
+- 同进程两个 Loop 使用不同 Runtime 时消息、预算、tools、cancel 和 Environment 记录互不污染，且无模块级当前状态。
+
+**验证:** `python -m pytest tests/integration/test_agent_loop.py tests/integration/test_agent_limits.py tests/integration/test_runtime_isolation.py`; `python -m ruff check src/coding_agent_neo/agent_loop.py tests/integration`。
+
+### [ ] T09 — 交付按 Runtime 隔离的上下文预算与增量压缩
+
+**依赖:** T08  
+**范围:** 实现 token 近似估算、Context Builder、完整工具交互分组、阈值触发 Compactor、一次强制压缩重试和有界失败退化；与 Loop 集成。排除跨 Agent 历史拼接和可执行 compaction tools。  
+**验收:**
+
+- 输入预算覆盖 system prompt、tool schemas、summary、有效消息、tool results 和预留输出；在 API 超窗前触发。
+- 小窗口测试中只压缩当前 agent；旧 summary + 较早历史生成新 summary，原始 JSONL 不变，compaction 事件记录 covered sequence。
+- assistant tool call 与对应 tool results 始终同组保留/压缩；其他 Agent 内部消息不进入当前 Context。
+- compaction 请求无 tools，summary 包含任务、约束、决策、文件、测试、未决项；失败只做有界退化，仍超窗明确 FAILED/LIMIT_REACHED。
+- ModelClient 报 context overflow 时最多强制压缩重试一次。
+
+**验证:** `python -m pytest tests/unit/test_context_builder.py tests/unit/test_compactor.py tests/integration/test_loop_compaction.py`; `python -m ruff check src/coding_agent_neo/context.py src/coding_agent_neo/compactor.py tests`。
+
+## 阶段 D：用户入口与恢复
+
+### [ ] T10 — 交付配置、交互/非交互 CLI 与事件渲染
+
+**依赖:** T03, T05, T06, T07, T09  
+**范围:** 实现架构定义的配置来源和校验、依赖组装、两种 CLI 模式、approval 交互、Terminal Renderer、统计和进程退出码。排除 session resume 业务和完整 TUI。  
+**验收:**
+
+- CLI > 环境变量 > 未入库 TOML > 默认值覆盖顺序有测试；API key 只按环境变量名读取，缺失/非法配置在任何副作用前失败且脱敏。
+- 交互模式支持初始任务、bash 确认、turn 后 follow-up、Ctrl+C；非交互支持 `--task`/stdin，ask 不阻塞，auto 可无人值守。
+- Renderer 展示 assistant、工具关键参数/结果、approval、退出码/耗时、计数、compaction/retry/limit/final state，并对大输出有界展示。
+- `--help`、成功、配置失败、FAILED、LIMIT_REACHED、INTERRUPTED 的退出码和 stdout/stderr 契约被文档化并集成测试。
+- Session 文件默认生成且可解析；终端展示、模型投影与持久化截断事实一致。
+
+**验证:** `python -m pytest tests/unit/test_config.py tests/unit/test_renderer.py tests/integration/test_cli.py`; `python -m ruff check .`; `python -m ruff format --check .`; `python -m build`。
+
+### [ ] T11 — 交付线性 Session 恢复与 follow-up
+
+**依赖:** T06, T09, T10  
+**范围:** 实现 `--resume` 加载、schema/session/sequence 校验、损坏尾行诊断、root Runtime 状态重建、最新 compaction 投影和 follow-up；绝不重放历史工具副作用。排除 branch/fork/tree 和 child Agent 恢复。  
+**验收:**
+
+- 正常 session 恢复相同 session/root agent ID、预算计数、active tools、取消合理初值和最新有效 context，随后可接受 follow-up。
+- 最后一行不完整时报告并仅使用之前完整事件；中间损坏、schema 不兼容或 ID/sequence 破坏明确拒绝或按文档策略失败。
+- 恢复过程中 fake/local environment 均未收到历史写文件或命令调用；只执行新 follow-up 产生的调用。
+- 恢复后的事件 sequence 接续且无重复，新的 compaction/turn/session 事件仍可解析。
+
+**验证:** `python -m pytest tests/unit/test_session_recovery.py tests/integration/test_resume_cli.py`; `python -m ruff check src/coding_agent_neo/session.py src/coding_agent_neo/cli.py tests`。
+
+## 阶段 E：验收、说明与提交准备
+
+### [ ] T12 — 完成全基线验收与真实编程任务演练
+
+**依赖:** T11  
+**范围:** 建立 AC-01～AC-14 的聚合验收套件、静态依赖审查、安全/异常场景和一个小型真实缺陷仓库演练；修复仅限已定义契约内缺陷，发现契约缺口先走变更控制。排除 Docker、子 Agent 和未列入首版的增强。  
+**验收:**
+
+- AC-02～AC-14 均有自动化或明确可复现证据，覆盖协议/工具失败、逃逸、权限、轨迹、resume、compaction、限制、secret、Environment 替换、Runtime 隔离、ID 关联和生命周期。
+- AC-01 在小型仓库完成探索、搜索、修改、测试失败后修正和最终总结；若使用真实 API，模型/网关与时间被记录但凭据不落盘。
+- 静态检查确认 Tool 无宿主 I/O/进程、只有 LocalEnvironment 含实际副作用、Loop 无进程级可变运行状态。
+- 全量 lint、format-check、test、build 通过；任何不可用外部服务或平台验证明确保留为限制，不能以 mock 冒充。
+
+**验证:** `python -m ruff check .`; `python -m ruff format --check .`; `python -m pytest`; `python -m pytest tests/acceptance -m acceptance`; `python -m build`; 按 `docs/acceptance-runbook.md` 执行并保存脱敏结果。
+
+### [ ] T13 — 准备可审计的 README、演示与提交清单
+
+**依赖:** T12  
+**范围:** 根据真实功能和验证结果完成不超过 1000 汉字的 `README.txt`、运行/安全说明、2 分钟演示脚本与录制清单、公开仓库/zip/截止时间检查表。外部发布、推送、录屏和提交必须由用户明确执行或授权，不在任务中擅自进行。  
+**验收:**
+
+- README.txt 包含公开仓库地址占位/最终值、可复现运行步骤、真实特色与限制，不含 API Key，正文满足 1000 汉字限制。
+- 演示脚本覆盖真实任务闭环和关键设计解释；最终 mp4 人工确认不超过 2 分钟、200 MB，画面/日志无凭据和私密路径。
+- 提交清单核对公开仓库为题目后新建、历史未压缩改写、2026-09-02 24:00（北京时间）后不再推送，以及“姓名.zip”只含 README.txt 和视频。
+- 架构、任务、进度和决策描述同一最终系统，所有勾选任务均有验证证据；skill 结构校验通过。
+
+**验证:** `python -m pytest`; `python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo .`; README 字数检查；`ffprobe` 检查最终视频时长/大小；人工提交清单审阅。
+
+## 推荐顺序
+
+依赖相同时优先沿关键路径推进：T01 → T02 → T03 → T04 → T05 → T06 → T07 → T08 → T09 → T10 → T11 → T12 → T13。实际选择仍以“依赖全部勾选且有证据”为准，不允许因推荐顺序跳过依赖。
