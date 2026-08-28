@@ -30,11 +30,11 @@
 ## 3. 目录与模块边界
 
 - 产品代码计划位于 `src/coding_agent_neo/`，测试位于 `tests/unit/`、`tests/integration/`、`tests/security/`、`tests/architecture/`、`tests/acceptance/`；具体模块所有权以 `ARCHITECTURE.md` 第 4 节为准。
-- 只有 `environment/local.py` 可以实际读写宿主文件、调用 `rg` 或启动 subprocess。Tool、Agent Loop 和 Context 不得直接使用这些能力。
+- 只有 `environment/local.py` 可以为工作区操作实际读写宿主文件、调用 `rg` 或启动通用 subprocess。工作区 Tool、Agent Loop 和 Context 不得直接使用这些能力。未来显式外部 Tool adapter 只可使用其协议专用传输；首版不实现该 adapter。
 - `runtime.py` 拥有每 Agent 可变状态；禁止模块级 current agent/session/workspace/active tools/budget。
-- `session.py` 拥有 append-only 事实历史；`context.py`/`compactor.py` 只能生成投影，不能删除或改写历史。
+- `session.py` 拥有 append-only 事实历史；`context.py`/`compactor.py` 只能接收显式 system prompt 并生成投影，不能删除或改写历史，也不得扫描 Skill 或外部资源。
 - `model_client.py` 隔离厂商协议；其他模块只接收归一化内部模型。
-- `cli.py` 只组装依赖和处理终端 I/O，不复制 Agent 决策、安全校验或持久化逻辑。
+- `cli.py` 只组装显式 system prompt/依赖并处理终端 I/O，不复制 Agent 决策、安全校验或持久化逻辑；首版不增加 Skill/MCP 配置。
 
 ## 4. 代码与契约约定
 
@@ -42,6 +42,7 @@
 - 命名使用 `snake_case`，类使用 `PascalCase`，常量使用 `UPPER_SNAKE_CASE`；事件类型、工具名、CLI 选项和 JSON 字段一经公开必须与架构一致。
 - 时间戳为 UTC ISO 8601，持续时间/超时使用单调时钟；ID 生成器和时钟必须可注入测试。
 - 每个 tool call 恰好一个 ToolResult；普通工具错误不得穿透 Loop。correlation ID、provider tool-call ID 和 agent ID 不得混用。
+- Registry、Executor 和 Loop 只面向通用 Tool 协议；可以用显式注入的 fake Tool 验证边界，但不得实现或声称 Skill/MCP 支持。
 - 路径安全由 Environment 最终执行；Local bash 必须明确是宿主权限命令而非沙箱。策略异常 fail-closed。
 - 配置覆盖为 CLI > 环境变量 > 未入库 TOML > 默认值。API Key 只按环境变量名读取；禁止把 key 值放进 CLI argv、代码、fixture、snapshot、日志、JSONL、README 或视频。
 - 测试优先 fake model/fake environment；mock 只能证明本项目逻辑，不能声称真实 API、shell 隔离或跨平台已验证。
@@ -55,7 +56,7 @@
 | Environment/文件/进程 | 临时目录组件测试、逃逸/symlink/timeout/cancel 安全测试 + 禁止依赖审查 |
 | Tool/Policy/Executor | schema、active/unknown、allow/ask/deny/fail-closed、恰好一个结果、ID 关联测试 |
 | Model 协议 | mock transport 的请求/响应/错误分类/重试/脱敏测试；若改真实兼容声明则补真实网关证据 |
-| Agent Loop/Context | scripted model 集成测试，覆盖成功、失败修正、限制、中断、压缩和 Runtime 隔离 |
+| Agent Loop/Context | scripted model 集成测试，覆盖通用 fake Tool、显式 system prompt、成功、失败修正、限制、中断、压缩和 Runtime 隔离；不以 fake 声称 Skill/MCP 已集成 |
 | JSONL/恢复 | append/flush、截断、损坏尾部、sequence、无副作用重放测试 |
 | CLI/配置/渲染 | 子进程集成测试、覆盖顺序、退出码、stdin/approval/Ctrl+C、大输出展示 + build |
 | 交付物 | 全量质量门、脱敏真实任务 runbook、README 字数、视频时长/大小和人工清单 |
@@ -67,6 +68,7 @@
 - 不得提交 secret、真实 session、私有数据、本地配置、备份、虚拟环境或大生成物。
 - 未经用户明确授权，不得执行 destructive git/filesystem 命令、改写已推送历史、发布仓库、推送远端、录屏或外部提交。
 - 不得绕过 Environment、approval、预算、事件落盘或测试质量门；不得以黑名单宣称 shell 安全。
+- 不得借“保留扩展边界”实现 Skill 发现/解析/加载、MCP 客户端/配置/传输、通用插件框架或相关 CLI 选项。
 - 不得修改无关文件、扩大当前卡片、顺手完成下一个任务、降低验收或把“未运行”写成“通过”。
 - 不得在依赖未完成、架构不一致或当前任务未经用户授权时开始产品实现。
 

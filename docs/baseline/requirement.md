@@ -2,7 +2,7 @@
 
 > 工作流状态：需求与开发过程文档已于 2026-08-28 通过用户审阅
 > 权威需求正文：[docs/agent-system-requirements-baseline.md](../agent-system-requirements-baseline.md)
-> 当前需求版本：1.1（2026-08-27）
+> 当前需求版本：1.2（2026-08-28）
 
 用户指定 `docs/agent-system-requirements-baseline.md` 的完整内容作为本项目的产品需求、范围边界与验收依据。本文件仅作为 `$orchestrate-spec-driven-development` 工作流的需求入口，不复制或改写需求正文，避免形成两个可能漂移的需求副本。
 

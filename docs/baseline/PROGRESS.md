@@ -13,14 +13,15 @@
 
 ## Current State
 
-- 用户已指定 `docs/agent-system-requirements-baseline.md` v1.1 为权威需求正文。
-- 开发过程文档已统一迁移到 `docs/baseline/`，并于 2026-08-28 通过用户审阅。
+- 用户已批准 `docs/agent-system-requirements-baseline.md` v1.2 为权威需求正文：首版只保留显式 system prompt 和通用 Tool 两个窄扩展边界，不实现 Skill/MCP 具体功能。
+- 开发过程文档已统一迁移到 `docs/baseline/`，并于 2026-08-28 通过用户变更审阅；已完成 T01～T05 的范围和实现证据保持不变。
 - 仓库现有 `pyproject.toml`、`src/coding_agent_neo/`、测试分层目录、示例配置和开发 README；CLI 目前只提供明确标注为未实现的公共帮助入口，模型、会话和 Agent Loop 行为仍未实现；工具系统已完成 T04，策略/执行器已完成 T05，T06/T07 尚未实现。
 - T01、T02、T03、T04、T05 均已通过各自专用 worker 验证和主 Agent 独立复验；T06、T07 已依赖就绪，但均尚未获后续派发授权。
 
 ## Known Issues
 
 - 尚无真实模型调用、完整 Agent Loop 或跨平台 Environment 运行证据；当前 LocalEnvironment 组件证据来自 macOS Python 3.12.11，shell 仍继承启动用户权限，不是操作系统沙箱。
+- 尚无且首版不要求 Skill 目录发现/解析/加载或 MCP 客户端/配置/传输证据；后续 T08/T09 的 fake Tool 和显式 prompt 测试只验证核心边界，不代表这两项集成已完成。
 - T13 涉及公开仓库、视频与外部提交的人工/授权步骤，不能由自动化测试单独证明。
 - 宿主 Homebrew Python 的直接安装命令受 PEP 668 限制；在 Python 3.12 `.venv` 中执行同一安装命令并完成全部 T01 质量门。
 

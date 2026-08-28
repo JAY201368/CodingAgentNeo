@@ -49,3 +49,10 @@
 - 选择：默认策略只对已验证且语法安全的 workspace 相对文件参数 allow，bash 按 ask/auto(yolo)/deny 决策；策略或 approval 异常统一 deny。`ToolExecutor` 为每次调用维持唯一内部 correlation ID，并通过不负责 sequence/持久化的最小 `ToolLifecycleEvent` 发布端口输出 `tool_call`、`policy_decision`、`tool_result`，事件 ID 使用 Runtime 的可注入 factory。
 - 理由与替代：路径真实边界仍必须由 Environment 最终执行；命令黑名单不能成为安全边界。T06 尚未实现，若 T05 提前拥有 sequence、JSONL 或订阅扇出会造成职责倒置；完全不发布事件又无法独立验证调用关联和审批轨迹。
 - 后果：T06 需把 lifecycle event 适配为分配 sequence 的 `EventEnvelope` 并负责扇出/持久化；T08 可直接复用同一 Executor。未注册名称、原始参数键和自定义 validator path 等不受信任诊断不得原样进入结果或事件。
+
+## 2026-08-28 — ARCH Skill/MCP 只保留窄扩展边界
+
+- 选择：将权威需求更新为 v1.2，只要求 system prompt 由组装层显式传入，以及 Registry、Executor 和 Loop 对符合协议的 Tool 来源无感。首版仍不实现 Skill 发现/解析/加载、MCP 客户端/配置/传输，也不引入通用资源管理器或插件框架。
+- 理由与替代：Pi 的小核心思路表明 Skill 属于上下文组装，MCP 可以适配为 Tool；为两者预先建立具体模块、生命周期或配置面会扩大首版范围并降低可解释性。
+- 安全边界：工作区文件、搜索和通用命令仍只经 `ExecutionEnvironment`。未来显式外部 Tool adapter 可拥有其协议必需的专用传输，但不得成为任意宿主文件、通用 shell、凭据泄漏或 Policy/事件绕过通道。
+- 后果：T01～T05 保持已接受且无代码返工；T08 用注入的非内置 fake Tool 证明 Loop 来源无感，T09 证明显式 system prompt 被预算与 compaction 完整保留，但这些 fake 证据不得表述为 Skill/MCP 已集成。本决策对“v1.1 是当前版本”的历史状态作出 supersede，但不改变单一权威需求正文的文档策略。

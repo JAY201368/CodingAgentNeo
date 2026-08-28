@@ -1,11 +1,11 @@
 # CodingAgentNeo 系统需求与关键设计基线
 
 > 状态：已确认基线  
-> 基线版本：1.1  
-> 基线日期：2026-08-27  
+> 基线版本：1.2
+> 基线日期：2026-08-28
 > 适用范围：CodingAgentNeo 首个可提交版本
 
-版本 1.1 在原有功能基线上正式加入 AgentRuntime、ExecutionEnvironment、agent ID 和 correlation ID 四项扩展边界；Docker 与子 Agent 的具体实现仍不属于首版范围。
+版本 1.1 在原有功能基线上正式加入 AgentRuntime、ExecutionEnvironment、agent ID 和 correlation ID 四项扩展边界。版本 1.2 进一步明确显式 system prompt 输入与通用 Tool 协议两个窄扩展点，使未来 Skill 上下文和 MCP Tool 适配可以在不修改 Agent Loop 的前提下加入。Docker、子 Agent、Skill 系统和 MCP 接入的具体实现仍不属于首版范围。
 
 ## 1. 文档目的
 
@@ -35,6 +35,7 @@ CodingAgentNeo 是一个小而完整、可恢复、可观察、执行受控的�
 - 自动上下文压缩；
 - 工具执行策略与运行时事件机制；
 - AgentRuntime 与 ExecutionEnvironment 的显式运行边界。
+- system prompt 作为显式输入组装，Tool 协议对工具来源无感。
 
 系统不以构建通用 Agent 平台为目标，不引入与核心编程闭环无关的复杂能力。
 
@@ -56,8 +57,9 @@ CodingAgentNeo 是一个小而完整、可恢复、可观察、执行受控的�
 3. 模型访问层必须保留清晰接口，但不要求首个版本实现多个模型厂商适配器。
 4. 首个版本以单 Agent、单前台任务、工具串行执行为边界。
 5. 系统不宣称提供操作系统级安全沙箱。
-6. 工具不得直接读写宿主机文件或启动宿主机进程，所有执行能力必须经由 ExecutionEnvironment 接口获得。
-7. Agent Loop 和每个 Agent 的运行状态不得依赖进程级可变全局变量。
+6. 内置工具与其他工作区工具不得直接读写宿主机文件、搜索宿主内容或启动通用宿主命令；这些工作区执行能力必须经由 ExecutionEnvironment 接口获得。
+7. 未来由用户显式配置的外部 Tool adapter 可以拥有完成其协议调用所必需的专用传输，但不得因此获得任意宿主文件或通用进程访问权，且仍必须经过 Tool Registry、Execution Policy、事件和 ToolResult 边界。
+8. Agent Loop 和每个 Agent 的运行状态不得依赖进程级可变全局变量。
 
 ## 4. 总体目标
 
@@ -68,7 +70,7 @@ CodingAgentNeo 是一个小而完整、可恢复、可观察、执行受控的�
 3. 即使运行中断或上下文发生压缩，完整会话事实仍尽可能保留。
 4. 核心代码规模和抽象层级保持可理解，能够在面试中解释每项关键决策。
 5. 对文件访问和高权限命令建立清晰、诚实的安全边界。
-6. 在不实现 Docker 和子 Agent 的前提下，为后续环境替换与多 Runtime 调度保留低成本扩展边界。
+6. 在不实现 Docker、子 Agent、Skill 系统和 MCP 接入的前提下，为后续环境替换、多 Runtime 调度、外部上下文组装和外部 Tool 适配保留低成本扩展边界。
 
 ## 5. 总体架构
 
@@ -79,6 +81,7 @@ CLI / Terminal Renderer
     ├── Shared Services
     │    ├── Model Client
     │    ├── Tool Registry
+    │    ├── Explicit System Prompt Input
     │    └── Event Emitter ─── Session Store (JSONL)
     │
     └── Agent Loop(runtime)
@@ -101,9 +104,9 @@ CLI / Terminal Renderer
 | Agent Loop | 使用显式传入的 AgentRuntime 驱动模型、工具和结果之间的循环；自身不依赖全局运行状态 |
 | AgentRuntime | 聚合一个 Agent 独有的身份、上下文状态、预算、active tools、取消信号、执行策略和环境引用 |
 | Model Client | 调用 OpenAI-compatible API，将响应归一化为内部模型 |
-| Context Builder | 从持久化历史投影出本次模型请求所需的工作上下文 |
+| Context Builder | 接收显式 system prompt，并从持久化历史投影出本次模型请求所需的工作上下文 |
 | Compactor | 在接近上下文预算时增量总结较早历史 |
-| Tool Registry | 注册工具、选择 active tools、生成工具 schema、分发调用 |
+| Tool Registry | 注册符合通用 Tool 协议的工具、选择 active tools、生成 schema 并分发调用；不分支判断工具来源 |
 | Tool Executor | 接收带稳定 correlation ID 的调用，校验参数、应用策略并通过 ToolExecutionContext 执行工具 |
 | ToolExecutionContext | 向工具暴露当前 agent ID、correlation ID、ExecutionEnvironment、取消信号和受控事件接口 |
 | Execution Policy | 在执行前给出 allow、ask 或 deny 决策 |
@@ -155,11 +158,12 @@ ContextState 只保存当前 Agent 的模型工作上下文状态、最近 compa
 
 依赖方向必须满足：
 
-1. Tool 依赖 ExecutionEnvironment 抽象，不依赖 LocalEnvironment 或 DockerEnvironment 具体类。
-2. Tool 不得直接调用 `open()`、`pathlib.Path` 的宿主机读写方法、`subprocess` 或宿主机 `rg` 完成实际操作。
+1. 内置 Tool 与其他工作区 Tool 依赖 ExecutionEnvironment 抽象，不依赖 LocalEnvironment 或 DockerEnvironment 具体类。
+2. 工作区 Tool 不得直接调用 `open()`、`pathlib.Path` 的宿主机读写方法、`subprocess` 或宿主机 `rg` 完成实际操作。
 3. LocalExecutionEnvironment 是首版宿主机执行能力的唯一入口。
-4. AgentRuntime 保存每个 Agent 独有的可变状态；Model Client、Tool Registry、Session Store 等无状态或受控共享服务不应被复制进 Runtime。
+4. AgentRuntime 保存每个 Agent 独有的可变状态；Model Client、Tool 注册定义、Session Store 等无状态或受控共享服务不应被复制进 Runtime。Tool 定义可共享，但可变 active set 必须以 `AgentRuntime.active_tools` 为单一事实源，传入单个 Loop 的 Registry active view 必须由它派生或与它校验一致。
 5. Agent Loop 通过构造参数或方法参数取得依赖，可以在同一进程中独立实例化多个互不污染的 Loop 和 Runtime。
+6. Agent Loop、Tool Executor 和 Session Store 只依赖通用 Tool 协议及标准事件，不得为内置工具、未来 Skill 上下文或外部 Tool 来源增加分支。
 
 ## 6. 核心执行模型
 
@@ -291,6 +295,8 @@ Model Client 必须：
 
 Registered Tools 与 Active Tools 必须分离：工具可以存在于系统中，但只有 active tools 会暴露给模型并允许调用。
 
+Registry、Executor 和 Agent Loop 必须面向上述 Tool 协议，而不得把六个内置工具的具体类型或来源作为分发前提。未来外部协议适配器可在组装阶段产生符合同一协议的 Tool；具体适配器、动态发现与第三方包加载仍不属于首版。
+
 首个版本不要求从第三方包或项目目录动态加载工具。
 
 ### FR-11：内置工具
@@ -306,7 +312,7 @@ Registered Tools 与 Active Tools 必须分离：工具可以存在于系统中�
 | `edit_file` | 通过精确旧文本替换等可验证方式修改已有文件 |
 | `bash` | 在 workspace 中执行通用 shell 命令，支持超时和退出码 |
 
-工具只能通过 ToolExecutionContext 中的 ExecutionEnvironment 完成文件、搜索和命令操作。LocalExecutionEnvironment 应优先使用 Python 标准库实现；其 `search` 可以调用宿主机 `rg`，不可用时应给出明确错误或提供合理退化方案。未来 DockerExecutionEnvironment 应在容器内部执行对应操作，不得回退到宿主机文件系统。
+上述六个内置工具只能通过 ToolExecutionContext 中的 ExecutionEnvironment 完成工作区文件、搜索和命令操作。LocalExecutionEnvironment 应优先使用 Python 标准库实现；其 `search` 可以调用宿主机 `rg`，不可用时应给出明确错误或提供合理退化方案。未来 DockerExecutionEnvironment 应在容器内部执行对应操作，不得回退到宿主机文件系统。
 
 ### FR-12：ToolResult
 
@@ -426,7 +432,7 @@ Session Store 必须采用 append-only JSONL 或语义等价的逐事件持久�
 
 ### FR-20：上下文预算
 
-Context Builder 必须针对当前 AgentRuntime，在调用模型前估算以下内容的输入占用：
+Context Builder 必须接收由组装层显式提供的 system prompt，并针对当前 AgentRuntime，在调用模型前估算以下内容的输入占用：
 
 - system prompt；
 - 工具 schemas；
@@ -436,6 +442,8 @@ Context Builder 必须针对当前 AgentRuntime，在调用模型前估算以下
 - 为模型输出预留的 token。
 
 首个版本可以使用带安全余量的近似 token 估算，但必须允许配置模型上下文窗口，并避免等到 API 报错后才进行常规压缩。
+
+Context Builder 不负责发现 Skill、扫描目录或识别外部资源类型。未来 Skill 支持应在组装层把所需的只读提示内容并入该显式 system prompt 输入，而不改变 Context Builder、Compactor、Agent Loop 或 Session Store 的职责。
 
 ### FR-21：自动增量压缩
 
@@ -558,7 +566,7 @@ Session 可以保存比模型上下文更完整的工具结果，但必须设置
 
 ## 17. 架构扩展性约束
 
-本节中的要求属于首版架构基线，但不要求首版实现 Docker 或子 Agent。
+本节中的要求属于首版架构基线，但不要求首版实现 Docker、子 Agent、Skill 系统或 MCP 接入。
 
 ### FR-31：AgentRuntime 隔离
 
@@ -570,7 +578,7 @@ Session 可以保存比模型上下文更完整的工具结果，但必须设置
 
 ### FR-32：ExecutionEnvironment 边界
 
-1. 所有工具产生的文件、搜索和进程副作用必须经由 ExecutionEnvironment。
+1. 所有内置工具与其他工作区工具产生的文件、搜索和通用进程副作用必须经由 ExecutionEnvironment。
 2. 首版必须实现 LocalExecutionEnvironment，并由其封装宿主机路径解析、文件操作、`rg` 调用和 subprocess 执行。
 3. Environment 必须提供明确的启动、关闭、取消、超时和 workspace 语义。
 4. Environment 返回值必须是与具体后端无关的结构化结果，使 ToolResult 不泄漏 Docker exec 等实现细节。
@@ -592,15 +600,32 @@ Session 可以保存比模型上下文更完整的工具结果，但必须设置
 5. correlation ID 必须由本系统生成并持久化，不得依赖模型厂商 ID 的存在、格式或跨请求稳定性。
 6. agent ID 表示事件归属，correlation ID 表示一次操作链路，两者不得混用。
 
+### FR-35：显式上下文组装边界
+
+1. system prompt 必须由 CLI 或其组装层构建后显式传入 Context Builder 或 Agent Loop，不得依赖 Context Builder 内部扫描的隐式全局资源。
+2. Context Builder 必须对 system prompt 的内容来源无感，并将其完整纳入 token 预算和 compaction 保留规则。
+3. 未来 Skill 系统可以在组装层把经用户信任的只读提示内容加入 system prompt，而无需修改 Agent Loop、Session Store 或 Tool 协议。
+4. 首版不实现 Skill 目录发现、`SKILL.md` 解析、按需加载、命令调用、资源访问或信任管理。
+
+### FR-36：外部 Tool 适配边界
+
+1. Tool Registry、Tool Executor 和 Agent Loop 必须能处理任意符合 FR-10 协议的显式注入 Tool，不得把工具来源或六个内置名称作为核心循环的分支条件。
+2. 未来外部协议适配器可在组装阶段把外部工具定义、调用和结果转换为现有 Tool schema、`execute` 和 ToolResult，而无需修改 Agent Loop。
+3. 这类 Tool 仍必须使用 active tools 控制可见性，并完整经过参数校验、Execution Policy、correlation ID、标准事件、输出截断和错误归一化边界。
+4. 外部 adapter 的专用传输必须由用户显式配置且不得泄漏凭据；它不是任意宿主文件、通用 shell 或未授权网络访问的绕过通道。
+5. 首版不实现 MCP 客户端、传输、服务器配置、动态工具发现或 MCP 的 tools/resources/prompts 等具体能力。
+
 ### 17.1 未来升级边界
 
-满足 FR-31 至 FR-34 后，预期升级路径如下：
+满足 FR-31 至 FR-36 后，预期升级路径如下：
 
 | 能力 | 预期主要改动 | 当前不得预设的错误假设 |
 | --- | --- | --- |
 | Docker 隔离 | 新增 DockerExecutionEnvironment、生命周期与配置 | 不得让 Tool 直接访问宿主机作为兜底 |
 | 串行子 Agent | 新增 `delegate_task`、child Runtime、预算与取消继承 | 不得让父子 Agent 共享 ContextState 或 active tools 可变对象 |
 | 并行子 Agent | 新增调度器、工作区隔离、全局预算协调和结果合并 | 不得默认多个 Agent 可安全共享同一可写工作区 |
+| Skill 上下文 | 在组装层新增发现、信任与提示内容组装 | 不得让 Context Builder 扫描 Skill 目录或让 Skill 隐式扩大工具权限 |
+| MCP Tool | 新增明确配置的协议 adapter，将外部工具映射为现有 Tool | 不得在 Loop 内实现 MCP 分支或绕过 Policy/事件/ToolResult |
 
 未来 child Runtime 默认应满足最小权限原则：其 active tools、预算和 ExecutionPolicy 不得比父 Runtime 更宽，除非用户显式授权。
 
@@ -619,7 +644,7 @@ Session 可以保存比模型上下文更完整的工具结果，但必须设置
 
 ### NFR-02：可测试性
 
-Agent Loop、Model Client、工具、策略、Context Builder、ExecutionEnvironment 和 Session Store 必须可分别测试。Agent Loop 测试必须能够注入 fake model 和 fake environment，而无需真实调用外部 API 或操作宿主机工作区。
+Agent Loop、Model Client、工具、策略、Context Builder、ExecutionEnvironment 和 Session Store 必须可分别测试。Agent Loop 测试必须能够注入 fake model、fake environment 和符合通用协议的 fake Tool；Context Builder 测试必须能注入任意显式 system prompt，而无需真实调用外部 API、扫描 Skill 或操作宿主机工作区。
 
 ### NFR-03：可恢复性
 
@@ -642,7 +667,7 @@ Agent Loop、Model Client、工具、策略、Context Builder、ExecutionEnviron
 
 ### NFR-07：可扩展性
 
-首版抽象必须服务于已确认的 Docker 和子 Agent 升级方向，但不得提前实现通用依赖注入容器、插件框架或分布式调度协议。新增 Environment 实现和创建 child Runtime 应当分别是环境替换与 Agent 组合的主要扩展点。
+首版抽象必须服务于已确认的 Docker、子 Agent、Skill 上下文和 MCP Tool 升级方向，但不得提前实现通用依赖注入容器、资源管理器、插件框架或分布式调度协议。新增 Environment 实现、创建 child Runtime、显式组装 system prompt 和注册通用 Tool 应当分别是环境替换、Agent 组合、Skill 上下文与外部工具的主要扩展点。
 
 ## 19. 首个版本明确不做
 
@@ -663,7 +688,7 @@ Agent Loop、Model Client、工具、策略、Context Builder、ExecutionEnviron
 - 服务端托管文件与代码执行；
 - 以命令黑名单冒充可靠安全边界。
 
-这些非目标不排除首版实现 AgentRuntime、ExecutionEnvironment、agent ID 和 correlation ID 等必要扩展边界。
+这些非目标不排除首版实现 AgentRuntime、ExecutionEnvironment、agent ID、correlation ID、显式 system prompt 输入和通用 Tool 协议等必要扩展边界。保留这些边界不等于实现 Skill 或 MCP，也不得借此增加其目录发现、配置、传输、生命周期或用户界面。
 
 ## 20. 基线验收标准
 
@@ -679,6 +704,8 @@ Agent Loop、Model Client、工具、策略、Context Builder、ExecutionEnviron
 4. 执行测试或其他验证命令；
 5. 根据失败结果至少进行一次合理修正；
 6. 最终返回无 tool call 的结果总结。
+
+Agent Loop 必须仅依赖 active Tool 的通用 schema 和执行结果；使用注入的非内置 fake Tool 时，不应需要为其来源修改循环分支。
 
 ### AC-02：结构化工具错误恢复
 
@@ -712,6 +739,7 @@ shell 返回非零退出码或文件编辑失败时，Agent Loop 不崩溃，失
 2. 新模型请求包含 summary 和最近完整交互；
 3. tool call 与 tool result 未被拆散；
 4. 会话能够继续完成任务。
+5. 组装层显式提供的 system prompt 仍完整出现在后续请求中，且已纳入输入预算。
 
 ### AC-09：执行限制
 
@@ -742,10 +770,10 @@ LocalExecutionEnvironment 能够初始化逻辑 workspace、执行六类环境�
 实现顺序不改变需求优先级，但建议按以下阶段降低集成风险：
 
 1. **运行边界**：AgentRuntime、ExecutionEnvironment Protocol、LocalExecutionEnvironment、事件 envelope。
-2. **核心闭环**：Model Client、可独立实例化的 Agent Loop、Tool Registry、ToolExecutionContext、六个内置工具。
+2. **核心闭环**：Model Client、可独立实例化且对 Tool 来源无感的 Agent Loop、Tool Registry、ToolExecutionContext、六个内置工具。
 3. **执行控制**：路径边界、Execution Policy、取消、超时、输出截断和运行限制。
 4. **持久化**：带 agent ID 和 correlation ID 的标准事件、JSONL Session Store、异常时保存。
-5. **上下文管理**：Runtime 独立的 Context Builder、预算估算、自动增量 compaction。
+5. **上下文管理**：显式 system prompt 输入、Runtime 独立的 Context Builder、预算估算、自动增量 compaction。
 6. **交互体验**：交互式 CLI、非交互模式、终端渲染和 session 恢复。
 7. **验证交付**：单元测试、fake-model/fake-environment 集成测试、真实任务演示、README.txt 和视频素材。
 
@@ -760,7 +788,8 @@ LocalExecutionEnvironment 能够初始化逻辑 workspace、执行六类环境�
 - 取消历史与模型上下文分离；
 - 取消自动 compaction；
 - 将“明确不做”的大型能力提升为首个版本必需项；
-- 破坏 Tool 对 ExecutionEnvironment 的单向依赖；
+- 将 Skill 目录发现、解析、按需加载或 MCP 客户端、传输、服务器配置等具体能力纳入首版；
+- 破坏工作区 Tool 对 ExecutionEnvironment 的单向依赖；
 - 将 AgentRuntime 状态改为进程级全局状态；
 - 改变 ExecutionEnvironment 契约或系统所声明的安全模型；
 - 引入新的 Agent 框架或远程执行控制平面。

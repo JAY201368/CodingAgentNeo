@@ -1,6 +1,6 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户审阅；T01、T02、T03、T04、T05 已接受
+> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
@@ -151,28 +151,32 @@ flowchart TD
 ### [ ] T08 — 交付可独立实例化、有界的 Agent Loop
 
 **依赖:** T03, T05, T06, T07  
-**范围:** 通过显式 ModelClient、ToolRegistry、EventEmitter 和 AgentRuntime 实现 LLM→tools→results 循环、状态机、串行多调用、预算、协议错误上限、中断和异常结束。先使用简单未压缩 Context Builder；排除自动 compaction、CLI 与 session 恢复。  
+**范围:** 通过显式 ModelClient、ToolRegistry、EventEmitter 和 AgentRuntime 实现 LLM→tools→results 循环、状态机、串行多调用、预算、协议错误上限、中断和异常结束。Loop 只面向 active Tool 通用协议，并在组装时保证 Runtime 与 Registry active view 一致。先使用简单未压缩 Context Builder；排除自动 compaction、CLI、session 恢复与任何 Skill/MCP 具体实现。
+
 **验收:**
 
-- scripted fake model 能驱动 read/search/edit/bash、看到失败结果后修正，并以无 tool call assistant 文本完成；多调用严格保持声明顺序。
+- scripted fake model 能驱动 read/search/edit/bash 与一个显式注入的非内置 fake Tool、看到失败结果后修正，并以无 tool call assistant 文本完成；Loop 对 Tool 来源无分支，多调用严格保持声明顺序。
 - 每轮 user/assistant/tool/turn/error/agent/session 事件顺序、ID 和结果完整；普通工具失败不终止，未捕获系统异常尽力写结束事件并返回 FAILED。
 - model steps、tool calls、连续协议错误、墙钟和命令限制命中时给出具体 LIMIT_REACHED，不无限循环。
 - Ctrl+C/cancellation 产生 INTERRUPTED 并关闭 Environment；交互 turn 完成不等于 session 强制结束。
 - 同进程两个 Loop 使用不同 Runtime 时消息、预算、tools、cancel 和 Environment 记录互不污染，且无模块级当前状态。
+- Loop 创建时若 `AgentRuntime.active_tools` 与 Registry active view 不一致则在任何模型或工具副作用前失败，消除两个可变 active 事实源。
 
 **验证:** `python -m pytest tests/integration/test_agent_loop.py tests/integration/test_agent_limits.py tests/integration/test_runtime_isolation.py`; `python -m ruff check src/coding_agent_neo/agent_loop.py tests/integration`。
 
 ### [ ] T09 — 交付按 Runtime 隔离的上下文预算与增量压缩
 
 **依赖:** T08  
-**范围:** 实现 token 近似估算、Context Builder、完整工具交互分组、阈值触发 Compactor、一次强制压缩重试和有界失败退化；与 Loop 集成。排除跨 Agent 历史拼接和可执行 compaction tools。  
+**范围:** 接收组装层显式提供的 system prompt，实现 token 近似估算、Context Builder、完整工具交互分组、阈值触发 Compactor、一次强制压缩重试和有界失败退化；与 Loop 集成。排除跨 Agent 历史拼接、可执行 compaction tools、Skill 目录发现/解析/加载与 MCP 上下文。
+
 **验收:**
 
-- 输入预算覆盖 system prompt、tool schemas、summary、有效消息、tool results 和预留输出；在 API 超窗前触发。
+- system prompt 是显式构造参数，Context Builder 不扫描 Skill 或其他外部资源；输入预算覆盖完整 system prompt、tool schemas、summary、有效消息、tool results 和预留输出，并在 API 超窗前触发。
 - 小窗口测试中只压缩当前 agent；旧 summary + 较早历史生成新 summary，原始 JSONL 不变，compaction 事件记录 covered sequence。
 - assistant tool call 与对应 tool results 始终同组保留/压缩；其他 Agent 内部消息不进入当前 Context。
 - compaction 请求无 tools，summary 包含任务、约束、决策、文件、测试、未决项；失败只做有界退化，仍超窗明确 FAILED/LIMIT_REACHED。
 - ModelClient 报 context overflow 时最多强制压缩重试一次。
+- compaction 前后的每次请求都完整保留同一显式 system prompt；测试可注入任意只读文本，但不实现或声称 Skill 支持。
 
 **验证:** `python -m pytest tests/unit/test_context_builder.py tests/unit/test_compactor.py tests/integration/test_loop_compaction.py`; `python -m ruff check src/coding_agent_neo/context.py src/coding_agent_neo/compactor.py tests`。
 
@@ -181,7 +185,8 @@ flowchart TD
 ### [ ] T10 — 交付配置、交互/非交互 CLI 与事件渲染
 
 **依赖:** T03, T05, T06, T07, T09  
-**范围:** 实现架构定义的配置来源和校验、依赖组装、两种 CLI 模式、approval 交互、Terminal Renderer、统计和进程退出码。排除 session resume 业务和完整 TUI。  
+**范围:** 实现架构定义的配置来源和校验、显式 system prompt/依赖组装、两种 CLI 模式、approval 交互、Terminal Renderer、统计和进程退出码。排除 session resume 业务、完整 TUI、Skill/MCP 配置或其他具体接入。
+
 **验收:**
 
 - CLI > 环境变量 > 未入库 TOML > 默认值覆盖顺序有测试；API key 只按环境变量名读取，缺失/非法配置在任何副作用前失败且脱敏。
@@ -210,12 +215,14 @@ flowchart TD
 ### [ ] T12 — 完成全基线验收与真实编程任务演练
 
 **依赖:** T11  
-**范围:** 建立 AC-01～AC-14 的聚合验收套件、静态依赖审查、安全/异常场景和一个小型真实缺陷仓库演练；修复仅限已定义契约内缺陷，发现契约缺口先走变更控制。排除 Docker、子 Agent 和未列入首版的增强。  
+**范围:** 建立 AC-01～AC-14 的聚合验收套件、静态依赖审查、安全/异常场景和一个小型真实缺陷仓库演练；修复仅限已定义契约内缺陷，发现契约缺口先走变更控制。排除 Docker、子 Agent、Skill/MCP 具体实现和未列入首版的增强。
+
 **验收:**
 
 - AC-02～AC-14 均有自动化或明确可复现证据，覆盖协议/工具失败、逃逸、权限、轨迹、resume、compaction、限制、secret、Environment 替换、Runtime 隔离、ID 关联和生命周期。
 - AC-01 在小型仓库完成探索、搜索、修改、测试失败后修正和最终总结；若使用真实 API，模型/网关与时间被记录但凭据不落盘。
-- 静态检查确认 Tool 无宿主 I/O/进程、只有 LocalEnvironment 含实际副作用、Loop 无进程级可变运行状态。
+- 静态检查确认工作区 Tool 无宿主 I/O/进程、只有 LocalEnvironment 含通用宿主文件/命令副作用、Loop 无工具来源分支和进程级可变运行状态、Context Builder 不扫描 Skill 或外部资源。
+- fake 边界证据只证明显式 system prompt 和通用 Tool 可注入，不得将其表述为已实现或验证 Skill/MCP。
 - 全量 lint、format-check、test、build 通过；任何不可用外部服务或平台验证明确保留为限制，不能以 mock 冒充。
 
 **验证:** `python -m ruff check .`; `python -m ruff format --check .`; `python -m pytest`; `python -m pytest tests/acceptance -m acceptance`; `python -m build`; 按 `docs/acceptance-runbook.md` 执行并保存脱敏结果。
