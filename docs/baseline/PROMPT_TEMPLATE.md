@@ -2,12 +2,12 @@
 
 开始前完整阅读：
 
-- `AGENTS.md`
-- `requirement.md` 及其链接的权威需求正文
-- `ARCHITECTURE.md`
-- `TASKS.md`
-- `PROGRESS.md`
-- 与当前任务有关的 `DECISIONS.md`
+- `docs/baseline/AGENTS.md`
+- `docs/baseline/requirement.md` 及其链接的权威需求正文
+- `docs/baseline/ARCHITECTURE.md`
+- `docs/baseline/TASKS.md`
+- `docs/baseline/PROGRESS.md`
+- 与当前任务有关的 `docs/baseline/DECISIONS.md`
 
 检查 worktree，并从任务勾选、完成摘要、实际文件和验证证据确认所有依赖。保留无关变更。
 
@@ -22,7 +22,7 @@
 - 严格遵守架构依赖、安全、secret、配置、持久化和公开契约。
 - 若发现公开接口、数据模型、状态机、安全或部署契约缺失，停止扩张：先报告需要的变更控制，不自行扩大范围。
 - 运行任务卡要求及 `AGENTS.md` 最低矩阵中的相关检查。修复范围内失败；范围外失败按原样报告。
-- 只按事实更新 `PROGRESS.md`。仅在产生持久且非显然选择时追加 `DECISIONS.md`；不要自行勾选任务。
+- 只按事实更新 `docs/baseline/PROGRESS.md`。仅在产生持久且非显然选择时追加 `docs/baseline/DECISIONS.md`；不要自行勾选任务。
 
 ## 最终报告
 

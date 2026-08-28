@@ -1,11 +1,11 @@
 # CodingAgentNeo 架构基线
 
-> 状态：待用户审阅，禁止据此自行开始实现  
+> 状态：已于 2026-08-28 通过用户审阅，可按任务 DAG 串行实施
 > 架构基线版本：0.1  
 > 日期：2026-08-27  
 > 需求入口：[requirement.md](requirement.md)
 
-本文把需求基线转化为可实施的模块边界、公开契约和验证策略。它不代表任何产品代码已经存在或任何命令已经通过验证。公开接口、数据模型、状态机、安全边界或部署契约变更时，必须先更新本文和受影响的任务卡。
+本文把需求基线转化为可实施的模块边界、公开契约和验证策略。实际已实现能力和命令证据以 `TASKS.md` 的完成摘要与 `PROGRESS.md` 为准。公开接口、数据模型、状态机、安全边界或部署契约变更时，必须先更新本文和受影响的任务卡。
 
 ## 1. 目标、用户与边界
 
@@ -27,6 +27,8 @@ CodingAgentNeo 面向需要在本地工作区完成编程任务的单个终端�
 - 工具副作用全部经 `ExecutionEnvironment`；每个 Agent 的可变状态全部归属显式 `AgentRuntime`。
 - API Key 只从环境变量或未入库本地配置取得，不进入代码、轨迹、错误或交付物。
 
+
+
 ### 1.3 首版明确排除
 
 Session tree/branch/fork、MCP、Skill、RAG/向量库、动态插件、子 Agent、并行工具、后台命令、运行中异步 steering、Plan/Todo 模式、Docker 环境实现、多厂商适配、完整 TUI、服务端代码执行，以及以命令黑名单冒充沙箱，均不在首版范围。架构只保留 Docker 与子 Agent 的低成本扩展边界，不实现其行为。
@@ -43,7 +45,7 @@ Session tree/branch/fork、MCP、Skill、RAG/向量库、动态插件、子 Agen
 | 持久化     | 每个 session 一个 append-only UTF-8 JSONL 文件                 | 逐事件刷新，便于审计、异常恢复和手工检查              |
 | 配置      | CLI > 环境变量 > 未入库 TOML 配置 > 内置默认值                         | 覆盖顺序唯一且可解释；凭据不允许写入已跟踪配置           |
 | 测试      | pytest；fake model 与 fake environment 为核心测试替身             | 单元/集成测试不依赖真实 API 或宿主机副作用          |
-| 质量门     | Ruff lint/format check、pytest、Python build               | 由 T01 建立；在 T01 完成前均属于计划命令而非已验证命令  |
+| 质量门     | Ruff lint/format check、pytest、Python build               | 已由 T01 建立并在 Python 3.12 环境验证              |
 
 
 关键质量不变量：核心循环可解释；关键事件尽快落盘；错误有界；安全声明真实；共享服务与每 Agent 可变状态分离；任何 mock 结果不得被表述为真实外部集成通过。
@@ -236,4 +238,4 @@ Turn/运行状态为 `RUNNING`、`WAITING_FOR_APPROVAL`、`COMPLETED_TURN`、`LI
 
 ## 11. 变更控制
 
-需求正文列出的基线变更条件全部适用。特别是改变模型协议、工具集合、默认权限、Session 语义、Runtime/Environment 单向依赖或安全声明时，必须先修改需求基线；其他公开契约变化至少先修改本文、相关任务和决策日志。当前文档整体处于待用户审阅状态；用户确认前不得派发 T01 或创建产品实现。
+需求正文列出的基线变更条件全部适用。特别是改变模型协议、工具集合、默认权限、Session 语义、Runtime/Environment 单向依赖或安全声明时，必须先修改需求基线；其他公开契约变化至少先修改本文、相关任务和决策日志。当前文档已通过用户审阅；实现仍必须按 `TASKS.md` 的依赖图一次派发一个任务。

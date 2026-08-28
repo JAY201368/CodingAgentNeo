@@ -1,6 +1,6 @@
 # CodingAgentNeo 决策日志
 
-本文件按时间追加持久且非显然的选择，不记录普通编辑或未经验证的完成声明。当前条目均为待用户审阅的初始规划决策；若被修改，应追加明确的 supersede 记录而不是改写历史语义。
+本文件按时间追加持久且非显然的选择，不记录普通编辑或未经验证的完成声明。初始规划决策已于 2026-08-28 通过用户审阅；若被修改，应追加明确的 supersede 记录而不是改写历史语义。
 
 ## 2026-08-27 — WF 以单一需求正文接入根目录工作流
 
@@ -19,3 +19,9 @@
 - 选择：首版每进程一个前台同步 Agent Loop，多 tool calls 严格串行；每 Agent 可变状态放入 `AgentRuntime`，所有副作用经 `ExecutionEnvironment`。
 - 理由与替代：这与单 Agent 首版范围和可解释性目标一致；提前引入 async 调度、子 Agent 或 Docker 会增加未被首版验收要求的并发与隔离复杂度。
 - 后果：取消和超时仍必须出现在接口与测试中；未来子 Agent 或 Docker 通过新 Runtime/Environment 组合扩展，不得让现有 Tool 或 Loop 依赖具体后端。
+
+## 2026-08-28 — WF 流程文档统一迁移至 docs/baseline
+
+- 选择：用户将七份开发过程文档统一放置在 `docs/baseline/`，并批准该文档基线进入 Execute 模式。
+- 理由与替代：集中保存基线文档可保持仓库根目录简洁；继续在根目录保留副本会产生双份流程状态。
+- 后果：所有 worker 和派发提示必须使用 `docs/baseline/` 路径；skill 结构校验以 `--repo docs/baseline` 运行，权威需求正文仍为 `docs/agent-system-requirements-baseline.md`。

@@ -3,3 +3,44 @@ temp/
 .DS_Store
 
 docs/temp/
+
+# Python caches and test/coverage output
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local configuration and credentials
+.env.*
+!.env.example
+*.local.toml
+*.local.yaml
+*.local.yml
+*.secret
+*.secret.*
+*.key
+*.pem
+credentials*.json
+
+# Runtime state and session history
+.coding-agent-neo/
+sessions/
+*.session.jsonl
+*.session.jsonl.tmp

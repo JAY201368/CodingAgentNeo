@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：待用户审阅；所有任务均未开始  
+> 状态：已于 2026-08-28 通过用户审阅；T01 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 用户确认本轮文档基线前，不得开始 T01。
+- 开始任何任务前必须取得用户对当前执行范围的授权；本轮授权仅覆盖派发并完成 T01。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -42,7 +42,7 @@ flowchart TD
 
 ## 阶段 A：可验证的项目与运行契约
 
-### [ ] T01 — 建立可安装、可检查的 Python 项目骨架
+### [x] T01 — 建立可安装、可检查的 Python 项目骨架
 
 **依赖:** 无  
 **范围:** 创建 Python 3.12 `pyproject.toml`、`src/coding_agent_neo/` 与测试目录骨架、CLI 占位帮助入口、开发依赖、示例配置和 `.gitignore`；固化安装、lint、format-check、test、build 命令。仅建立基础设施，不实现 Agent、模型、工具或环境业务。  
@@ -54,6 +54,8 @@ flowchart TD
 - 示例配置不含真实凭据；README 开发说明不夸大尚未实现的功能。
 
 **验证:** `python -m pip install -e ".[dev]"`; `python -m ruff check .`; `python -m ruff format --check .`; `python -m pytest`; `python -m build`; `python -m coding_agent_neo --help`。
+
+**完成摘要（2026-08-28）:** 已交付 Python 3.12 `src`-layout 可编辑安装骨架、两种 CLI help 入口、无凭据示例配置、分层测试目录和构建/运行时忽略规则；Agent、模型、工具、Environment、Session 与 Loop 均保持未实现。Worker 与主 Agent 在 Python 3.12.11 `.venv` 中验证 `pip install -e ".[dev]"`、Ruff lint/format、`pytest`（2 passed）、`python -m build`、模块/console-script help 和 `git diff --check` 均通过；隔离安装与构建需要正常访问依赖索引，宿主 Homebrew Python 的全局 pip 仍受 PEP 668 管理。
 
 ### [ ] T02 — 固化 Runtime、Environment 与事件领域契约
 
@@ -221,7 +223,7 @@ flowchart TD
 - 提交清单核对公开仓库为题目后新建、历史未压缩改写、2026-09-02 24:00（北京时间）后不再推送，以及“姓名.zip”只含 README.txt 和视频。
 - 架构、任务、进度和决策描述同一最终系统，所有勾选任务均有验证证据；skill 结构校验通过。
 
-**验证:** `python -m pytest`; `python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo .`; README 字数检查；`ffprobe` 检查最终视频时长/大小；人工提交清单审阅。
+**验证:** `python -m pytest`; `python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/baseline`; README 字数检查；`ffprobe` 检查最终视频时长/大小；人工提交清单审阅。
 
 ## 推荐顺序
 

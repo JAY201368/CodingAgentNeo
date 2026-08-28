@@ -1,0 +1,18 @@
+# Copy this file to an ignored local TOML file before a future implementation
+# supports configuration loading. Keep credentials in the environment only.
+
+model = "your-model-name"
+api_base = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+workspace = "."
+session_dir = ".coding-agent-neo/sessions"
+approval_mode = "ask"
+
+max_steps = 32
+max_tool_calls = 64
+max_wall_seconds = 900
+command_timeout = 120
+context_window = 128000
+reserved_output_tokens = 4096
+model_output_limit = 12000
+session_output_limit = 50000
