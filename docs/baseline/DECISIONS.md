@@ -25,3 +25,9 @@
 - 选择：用户将七份开发过程文档统一放置在 `docs/baseline/`，并批准该文档基线进入 Execute 模式。
 - 理由与替代：集中保存基线文档可保持仓库根目录简洁；继续在根目录保留副本会产生双份流程状态。
 - 后果：所有 worker 和派发提示必须使用 `docs/baseline/` 路径；skill 结构校验以 `--repo docs/baseline` 运行，权威需求正文仍为 `docs/agent-system-requirements-baseline.md`。
+
+## 2026-08-28 — T02 固化带语义 ID 的事件与后端无关环境模型
+
+- 选择：对内部 `AgentId`、`SessionId`、`EventId` 和 `CorrelationId` 使用可验证的字符串子类型；`ProviderToolCallId` 单独作为不透明外部字符串，仅拒绝空值、NUL 和非字符串并原样保留。`EventEnvelope` 将时间戳规范化为带 `Z` 的 UTC ISO 8601 字符串，并通过显式 ID factory/clock 提供测试注入点。六类环境请求/结果只表达逻辑路径、命令、限制和结构化状态，具体后端不进入模型。
+- 理由与替代：字符串运行时兼容 JSONL，同时为 agent 归属和内部调用链保留可审查的类型边界；厂商 ID 的格式由兼容网关决定，不能套用内部字符集规则。直接暴露 `datetime`、宿主绝对路径或 Docker 元数据会增加序列化和后端耦合。时间/内部 ID 默认实现无共享可变状态，测试可使用确定性来源。
+- 后果：后续 Session/Event 持久化可直接使用 `EventEnvelope.to_dict()`；Local 或 Docker 实现只能解释这些逻辑请求并返回统一结果，不能改变 Tool/Loop 的公开模型。

@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户审阅；T01 已接受
+> 状态：已于 2026-08-28 通过用户审阅；T01、T02 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；本轮授权仅覆盖派发并完成 T01。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T02 已完成，本轮未授权继续派发后续任务。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -57,7 +57,7 @@ flowchart TD
 
 **完成摘要（2026-08-28）:** 已交付 Python 3.12 `src`-layout 可编辑安装骨架、两种 CLI help 入口、无凭据示例配置、分层测试目录和构建/运行时忽略规则；Agent、模型、工具、Environment、Session 与 Loop 均保持未实现。Worker 与主 Agent 在 Python 3.12.11 `.venv` 中验证 `pip install -e ".[dev]"`、Ruff lint/format、`pytest`（2 passed）、`python -m build`、模块/console-script help 和 `git diff --check` 均通过；隔离安装与构建需要正常访问依赖索引，宿主 Homebrew Python 的全局 pip 仍受 PEP 668 管理。
 
-### [ ] T02 — 固化 Runtime、Environment 与事件领域契约
+### [x] T02 — 固化 Runtime、Environment 与事件领域契约
 
 **依赖:** T01  
 **范围:** 实现后端无关数据模型、`AgentRuntime`/ContextState/BudgetTracker/CancellationSignal、ExecutionEnvironment Protocol、ToolExecutionContext、EventEnvelope 和 ID/时钟注入点；提供测试 fake environment。排除 Local I/O、JSONL、模型网络和 Agent Loop。  
@@ -69,6 +69,8 @@ flowchart TD
 - 数据模型校验非法 ID、负预算、重复 mutable default 等边界并有单元测试。
 
 **验证:** `python -m pytest tests/unit/test_runtime.py tests/unit/test_models.py tests/unit/test_environment_contract.py`; `python -m ruff check .`; `python -m ruff format --check .`。
+
+**完成摘要（2026-08-28）:** 已交付后端无关请求/结果与工具调用模型、每 Agent 独占的 ContextState/BudgetTracker/active tools/CancellationSignal、显式 AgentRuntime 依赖、ToolExecutionContext、ExecutionEnvironment Protocol、EventEnvelope 及可注入 ID/UTC/单调时钟；fake environment 只记录六类调用，不执行宿主机 I/O。内部 ID 使用受控语义字符串，厂商 tool-call ID 作为非空无 NUL 的不透明值原样保留。明确排除 Local I/O、JSONL、模型网络、工具执行和 Agent Loop。Worker 与主 Agent 在 Python 3.12.11 下验证 T02 定向测试 `17 passed`、全量 `19 passed`，Ruff lint/format、opaque provider ID 检查、workflow validator 和 `git diff --check` 均通过。
 
 ## 阶段 B：执行、工具、持久化与模型组件
 
