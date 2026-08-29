@@ -28,6 +28,7 @@ env/
 ENV/
 
 # Local configuration and credentials
+.coding-agent-neo.toml
 .env.*
 !.env.example
 *.local.toml

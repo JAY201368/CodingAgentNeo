@@ -1,5 +1,5 @@
-# Copy this file to an ignored local TOML file before a future implementation
-# supports configuration loading. Keep credentials in the environment only.
+# Copy this file to the ignored .coding-agent-neo.toml. Keep credentials in
+# the environment only; api_key_env is a name, never the key value.
 
 model = "your-model-name"
 api_base = "https://api.openai.com/v1"

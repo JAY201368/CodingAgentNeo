@@ -86,3 +86,9 @@
 - 选择：Context Builder 用 UTF-8 字节数除以 3、`1.12` 安全倍率和每项 framing overhead 做与 provider tokenizer 无关的保守估算；将显式 system prompt、active tool schemas、summary、当前 Runtime 消息/工具结果与预留输出统一计入窗口，默认在总窗口 `85%` 预触发。assistant tool calls 与全部匹配 tool results 作为不可拆分组，并使用 Store 分配的 sequence 作为压缩覆盖边界。
 - 压缩边界：Compactor 的每次请求继续完整携带同一显式 system prompt，tools 恒为空，且只总结能在自身窗口中完整容纳的旧 summary + 组前缀。成功事件持久化 summary 和 covered sequence；主 Store 失败则回滚 Runtime 投影指针并终止。
 - 失败与后果：普通 compaction 失败不内部重试，只按完整组省略旧前缀、注入明确退化提示并追加失败事件；仍超窗则 `LIMIT_REACHED(context_window)`。provider 报 context overflow 时，Loop 只做一次强制压缩后重试，再次 overflow 明确 `FAILED`。该选择不引入 tokenizer 包、Skill/MCP 发现或任何可执行 compaction Tool；T10 只需组装窗口/预留配置，T11 恢复最新 summary、covered/degraded sequence 投影状态。
+
+## 2026-08-29 — T10 CLI 配置文件、stdio 与退出码契约
+
+- 选择：默认本地配置文件为已忽略的 `.coding-agent-neo.toml`，可用 `--config` 或 `CODING_AGENT_NEO_CONFIG` 选择其他路径；非交互最终 assistant 文本单独写 stdout，事件/诊断写 stderr。进程退出码固定为完成 `0`、`FAILED`/启动失败 `1`、用法/配置失败 `2`、`LIMIT_REACHED` `3`、`INTERRUPTED` `130`。
+- 理由与替代：单独 stdout 让 shell 脚本可直接消费最终结果，同时 stderr 保留可观察轨迹；`130` 遵循 SIGINT 的常见 shell 约定，独立的 limit 码可避免与系统失败混淆。本地 TOML 只保存 API key 环境变量名，不接受 key 值。
+- 后果：T11 的 `--resume` 业务必须保持这些 stdio/退出码与 secret 契约；完整 TUI、Skill/MCP 配置仍不在该配置面中。

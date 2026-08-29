@@ -190,7 +190,7 @@ flowchart TD
 
 ## 阶段 D：用户入口与恢复
 
-### [ ] T10 — 交付配置、交互/非交互 CLI 与事件渲染
+### [x] T10 — 交付配置、交互/非交互 CLI 与事件渲染
 
 **依赖:** T03, T05, T06, T07, T09  
 **范围:** 实现架构定义的配置来源和校验、显式 system prompt/依赖组装、两种 CLI 模式、approval 交互、Terminal Renderer、统计和进程退出码。排除 session resume 业务、完整 TUI、Skill/MCP 配置或其他具体接入。
@@ -204,6 +204,8 @@ flowchart TD
 - Session 文件默认生成且可解析；终端展示、模型投影与持久化截断事实一致。
 
 **验证:** `python -m pytest tests/unit/test_config.py tests/unit/test_renderer.py tests/integration/test_cli.py`; `python -m ruff check .`; `python -m ruff format --check .`; `python -m build`。
+
+**完成摘要（2026-08-29）:** 已交付 CLI > `CODING_AGENT_NEO_*` 环境变量 > 未入库 `.coding-agent-neo.toml` > 默认值的配置解析与副作用前校验，API key 只按环境变量名解析且不进入 repr/诊断；完成显式 system prompt、六个内置工具、root Runtime、Local Environment、Store-first EventEmitter/Renderer 和 OpenAI-compatible ModelClient 的组装。交互模式支持初始任务、bash 确认、turn 后 follow-up 与 Ctrl+C，非交互模式支持 `--task`/stdin、ask 立即拒绝与 auto/yolo；stdout/stderr 和退出码契约、默认可解析 JSONL session、有界事件展示、retry/compaction/预算统计均有测试与文档。主 Agent 在 Python 3.12.11 `.venv` 中独立复验定向测试 `17 passed`、全量 `166 passed`，Ruff lint/format-check、`python -m build`、workflow validator、CLI help 与 `git diff --check` 均通过；未执行真实网关调用，session resume、完整 TUI 与 Skill/MCP 具体接入仍明确排除。
 
 ### [ ] T11 — 交付线性 Session 恢复与 follow-up
 

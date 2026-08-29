@@ -231,6 +231,7 @@ class BudgetTracker:
             "max_tool_calls": self.max_tool_calls,
             "max_protocol_errors": self.max_protocol_errors,
             "max_wall_seconds": self.max_wall_seconds,
+            "elapsed_seconds": self.elapsed_seconds,
         }
 
 

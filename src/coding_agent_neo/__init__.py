@@ -15,6 +15,7 @@ from coding_agent_neo.compactor import (
     CompactionSourceTooLarge,
     Compactor,
 )
+from coding_agent_neo.config import AppConfig, Config, ConfigError, load_config
 from coding_agent_neo.context import (
     ApproximateTokenEstimator,
     CompactionPlan,
@@ -97,6 +98,7 @@ from coding_agent_neo.models import (
     WriteFileRequest,
     WriteFileResult,
 )
+from coding_agent_neo.renderer import RenderStats, TerminalRenderer
 from coding_agent_neo.runtime import (
     AgentRuntime,
     BudgetTracker,
@@ -128,6 +130,7 @@ __all__ = [
     "AgentLoop",
     "AgentLoopResult",
     "AgentRuntime",
+    "AppConfig",
     "BudgetTracker",
     "CancelledError",
     "CancellationRequested",
@@ -149,6 +152,8 @@ __all__ = [
     "CompactionPlan",
     "CompactionSourceTooLarge",
     "Compactor",
+    "Config",
+    "ConfigError",
     "CorrelationId",
     "DeliveryStatus",
     "DuplicateEventIdError",
@@ -201,6 +206,7 @@ __all__ = [
     "RuntimeState",
     "RetryConfig",
     "RetryPolicy",
+    "RenderStats",
     "SearchMatch",
     "SearchRequest",
     "SearchResult",
@@ -218,12 +224,14 @@ __all__ = [
     "ToolExecutionContext",
     "ToolResult",
     "ToolResultStatus",
+    "TerminalRenderer",
     "TurnResult",
     "Usage",
     "WriteFileRequest",
     "WriteFileResult",
     "normalize_response",
     "group_messages",
+    "load_config",
     "read_session",
     "safe_json_value",
 ]

@@ -669,6 +669,7 @@ class OpenAICompatibleModelClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         logger: logging.Logger | None = None,
+        retry_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         if model is not None and (not isinstance(model, str) or not model.strip()):
             raise ModelClientError(
@@ -709,6 +710,11 @@ class OpenAICompatibleModelClient:
                 ModelErrorCategory.FATAL,
                 ModelErrorCode.CONFIGURATION,
             )
+        if retry_observer is not None and not callable(retry_observer):
+            raise ModelClientError(
+                ModelErrorCategory.FATAL,
+                ModelErrorCode.CONFIGURATION,
+            )
         if base_url is not None and (not isinstance(base_url, str) or not base_url.strip()):
             raise ModelClientError(
                 ModelErrorCategory.FATAL,
@@ -730,6 +736,7 @@ class OpenAICompatibleModelClient:
         self._sleep = sleep
         self._clock = clock
         self._logger = logger or LOGGER
+        self._retry_observer = retry_observer
         self._transport = None
         self._client = client
 
@@ -888,6 +895,17 @@ class OpenAICompatibleModelClient:
             attempt,
             delay,
         )
+        if self._retry_observer is not None:
+            self._retry_observer(
+                {
+                    "reason": error.code.value,
+                    "category": error.category.value,
+                    "status_code": error.status_code,
+                    "attempt": attempt,
+                    "max_attempts": self.retry_policy.max_attempts,
+                    "delay_seconds": delay,
+                }
+            )
 
     def complete(
         self,
