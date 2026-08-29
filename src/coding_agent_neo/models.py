@@ -602,6 +602,245 @@ class ToolCall:
         return self.parsed_arguments if self.parsed_arguments is not None else self.raw_arguments
 
 
+_MODEL_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)([\"']?\b(?:api[_-]?key|authorization|password|passwd|secret|credential|cookie|"
+    r"private[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|token)\b"
+    r"[\"']?\s*[:=]\s*)"
+    r"([\"'])([^\"']*)\2"
+)
+_MODEL_SECRET_UNQUOTED = re.compile(
+    r"(?i)([\"']?\b(?:api[_-]?key|authorization|password|passwd|secret|credential|cookie|"
+    r"private[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|token)\b"
+    r"[\"']?\s*[:=]\s*)"
+    r"(?![\"'])([^\s,;}]+)"
+)
+_MODEL_BEARER = re.compile(r"(?i)\bbearer\s+[^\s,;\"'}]+")
+
+
+def _redact_model_text(value: str) -> str:
+    """Redact common credentials before text crosses the model boundary."""
+
+    value = _MODEL_BEARER.sub("Bearer <redacted>", value)
+    value = _MODEL_SECRET_ASSIGNMENT.sub(r'\1"<redacted>"', value)
+    return _MODEL_SECRET_UNQUOTED.sub(r"\1<redacted>", value)
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedUsage:
+    """Provider-neutral token counters returned by a model call."""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("input_tokens", "output_tokens", "total_tokens"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer or None")
+
+    @property
+    def prompt_tokens(self) -> int | None:
+        """OpenAI-compatible spelling for input token count."""
+
+        return self.input_tokens
+
+    @property
+    def completion_tokens(self) -> int | None:
+        """OpenAI-compatible spelling for output token count."""
+
+        return self.output_tokens
+
+    def to_dict(self) -> dict[str, int]:
+        """Return only counters that the provider supplied."""
+
+        return {
+            name: value
+            for name, value in (
+                ("input_tokens", self.input_tokens),
+                ("output_tokens", self.output_tokens),
+                ("total_tokens", self.total_tokens),
+            )
+            if value is not None
+        }
+
+    as_dict = to_dict
+
+
+# Descriptive aliases keep integration code compatible with common naming.
+ModelUsage = NormalizedUsage
+Usage = NormalizedUsage
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedToolCall:
+    """A structured provider tool call before an internal correlation ID exists.
+
+    The Agent Loop owns creation of an internal :class:`CorrelationId`; this
+    transport DTO therefore deliberately does not contain one.  ``raw_arguments``
+    remains the provider's JSON text (with credentials redacted at the boundary),
+    while ``arguments_valid`` and ``diagnostics`` let the protocol boundary
+    decide how malformed calls should be reported.
+    """
+
+    provider_tool_call_id: ProviderToolCallId | None = None
+    name: str | None = None
+    raw_arguments: str = ""
+    arguments_valid: bool = False
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.provider_tool_call_id is not None:
+            if not isinstance(self.provider_tool_call_id, str):
+                raise TypeError("provider_tool_call_id must be a string or None")
+            provider_value = _redact_model_text(self.provider_tool_call_id)
+            object.__setattr__(
+                self,
+                "provider_tool_call_id",
+                _coerce_identifier(provider_value, ProviderToolCallId),
+            )
+        if self.name is not None and (not isinstance(self.name, str) or not self.name):
+            raise ValueError("tool name must be a non-empty string or None")
+        if self.name is not None:
+            object.__setattr__(self, "name", _redact_model_text(self.name))
+        if not isinstance(self.raw_arguments, str):
+            raise TypeError("raw_arguments must be a string")
+        object.__setattr__(self, "raw_arguments", _redact_model_text(self.raw_arguments))
+        if not isinstance(self.arguments_valid, bool):
+            raise TypeError("arguments_valid must be a boolean")
+        diagnostics = tuple(self.diagnostics)
+        if not all(isinstance(item, str) and item for item in diagnostics):
+            raise TypeError("diagnostics must contain non-empty strings")
+        object.__setattr__(self, "diagnostics", diagnostics)
+
+    @property
+    def provider_id(self) -> ProviderToolCallId | None:
+        """Short alias for the opaque provider identifier."""
+
+        return self.provider_tool_call_id
+
+    @property
+    def id(self) -> ProviderToolCallId | None:
+        """OpenAI-compatible spelling for the provider identifier."""
+
+        return self.provider_tool_call_id
+
+    @property
+    def arguments(self) -> str:
+        """Original (safe, redacted) argument JSON text."""
+
+        return self.raw_arguments
+
+    @property
+    def tool_call_id(self) -> ProviderToolCallId | None:
+        """OpenAI-compatible alias for the provider identifier."""
+
+        return self.provider_tool_call_id
+
+    @property
+    def raw_args(self) -> str:
+        """Short alias for the original argument JSON text."""
+
+        return self.raw_arguments
+
+    @property
+    def valid(self) -> bool:
+        """Whether this call has structurally valid arguments."""
+
+        return self.arguments_valid and not self.diagnostics
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-compatible transport representation."""
+
+        return {
+            "provider_tool_call_id": (
+                None if self.provider_tool_call_id is None else str(self.provider_tool_call_id)
+            ),
+            "name": self.name,
+            "raw_arguments": self.raw_arguments,
+            "arguments_valid": self.arguments_valid,
+            "diagnostics": list(self.diagnostics),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedAssistantResponse:
+    """Provider-neutral assistant output returned by :class:`ModelClient`."""
+
+    text: str = ""
+    tool_calls: tuple[NormalizedToolCall, ...] = ()
+    usage: NormalizedUsage | None = None
+    finish_reason: str | None = None
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.text, str):
+            raise TypeError("assistant text must be a string")
+        object.__setattr__(self, "text", _redact_model_text(self.text))
+        tool_calls = tuple(self.tool_calls)
+        if not all(isinstance(call, NormalizedToolCall) for call in tool_calls):
+            raise TypeError("tool_calls must contain NormalizedToolCall values")
+        object.__setattr__(self, "tool_calls", tool_calls)
+        if self.usage is not None and not isinstance(self.usage, NormalizedUsage):
+            raise TypeError("usage must be NormalizedUsage or None")
+        if self.finish_reason is not None and not isinstance(self.finish_reason, str):
+            raise TypeError("finish_reason must be a string or None")
+        object.__setattr__(
+            self,
+            "finish_reason",
+            _redact_model_text(self.finish_reason) if self.finish_reason is not None else None,
+        )
+        diagnostics = tuple(self.diagnostics)
+        if not all(isinstance(item, str) and item for item in diagnostics):
+            raise TypeError("diagnostics must contain non-empty strings")
+        object.__setattr__(self, "diagnostics", diagnostics)
+
+    @property
+    def assistant_text(self) -> str:
+        """Descriptive alias for the normalized assistant text."""
+
+        return self.text
+
+    @property
+    def message(self) -> str:
+        """Compatibility alias used by simple loop integrations."""
+
+        return self.text
+
+    @property
+    def content(self) -> str:
+        """OpenAI-compatible alias for assistant text."""
+
+        return self.text
+
+    @property
+    def calls(self) -> tuple[NormalizedToolCall, ...]:
+        """Short alias for normalized tool calls."""
+
+        return self.tool_calls
+
+    @property
+    def finish_reason_code(self) -> str | None:
+        """Descriptive alias for the provider finish reason."""
+
+        return self.finish_reason
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a detached, JSON-compatible normalized response."""
+
+        return {
+            "text": self.text,
+            "tool_calls": [call.to_dict() for call in self.tool_calls],
+            "usage": None if self.usage is None else self.usage.to_dict(),
+            "finish_reason": self.finish_reason,
+            "diagnostics": list(self.diagnostics),
+        }
+
+    as_dict = to_dict
+
+
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     """Unified tool result shape for the later executor."""
@@ -825,6 +1064,10 @@ __all__ = [
     "IdFactoryLike",
     "ListFilesRequest",
     "ListResult",
+    "ModelUsage",
+    "NormalizedAssistantResponse",
+    "NormalizedToolCall",
+    "NormalizedUsage",
     "ProviderToolCallId",
     "ReadFileRequest",
     "ReadFileResult",
@@ -839,6 +1082,7 @@ __all__ = [
     "ToolCall",
     "ToolResult",
     "ToolResultStatus",
+    "Usage",
     "UUIDIdFactory",
     "WriteFileRequest",
     "WriteFileResult",

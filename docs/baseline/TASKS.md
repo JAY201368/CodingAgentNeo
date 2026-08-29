@@ -1,6 +1,6 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05、T06 已接受
+> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05、T06、T07 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
@@ -135,7 +135,7 @@ flowchart TD
 
 **完成摘要（2026-08-29）:** 已交付 Store-first `EventEmitter`、统一 sequence/event ID 管理、append-only UTF-8 JSONL `SessionStore`、逐事件 flush/默认 `fsync`、安全 JSON 化与敏感字段递归脱敏、UTF-8 字节上限内的 payload 头尾预览、同步订阅扇出和逐订阅者 success/failed/skipped 报告，以及完整记录读取和损坏尾行定位。T05 `ToolLifecycleEvent` 可直接适配为 canonical `EventEnvelope`；主 Agent 审查时修复了 usage 的 `input_tokens`/`output_tokens` 被误判为凭据的问题，同时保持 access/generic token 字段脱敏。Python 3.12.11 下定向测试 `19 passed`、T02/T05 回归矩阵 `41 passed`、全量 `87 passed`；Ruff lint/format、`python -m build`、workflow validator、独立凭据/截断/重开/部分扇出失败对抗脚本与 `git diff --check` 均通过。上下文投影、CLI/renderer 具体展示、业务恢复和 Agent Loop 保持未实现。
 
-### [ ] T07 — 交付 OpenAI-compatible 模型访问与有界重试
+### [x] T07 — 交付 OpenAI-compatible 模型访问与有界重试
 
 **依赖:** T01  
 **范围:** 实现 ModelClient 接口与 Chat Completions 适配器、请求构造、原生 tool calls/usage/finish reason 归一化、错误分类、退避策略和脱敏。使用 mock transport，不接入 Agent Loop 或 compaction 决策。  
@@ -147,6 +147,8 @@ flowchart TD
 - 测试日志、异常和归一化对象中无 API Key、Authorization 或请求头泄漏；不使用 Markdown/正则解析主要工具调用。
 
 **验证:** `python -m pytest tests/unit/model/test_openai_compatible.py tests/unit/model/test_retry.py tests/security/test_model_redaction.py`; `python -m ruff check src/coding_agent_neo/model_client.py tests/unit/model`。
+
+**完成摘要（2026-08-29）:** 已交付同步 `ModelClient` Protocol 与 OpenAI-compatible Chat Completions 适配器，标准 messages、active tool schemas 和 parameters 通过官方 OpenAI client 传输；SDK 内部重试被关闭，项目层仅对网络/超时、429、408 与选定 5xx 做可注入、有限指数退避。新增不含内部 correlation ID 的 `NormalizedAssistantResponse`/`NormalizedToolCall`/`NormalizedUsage`，保持合法 provider ID、非敏感 arguments 原文、tool call 顺序、usage 和 finish reason，并把缺失/重复 ID、非法 arguments 和缺失响应转为稳定诊断；认证、权限、模型、配置与 context overflow 分类明确且不误重试。异常、日志、归一化文本和 arguments 不保留凭据或 provider headers/body。Python 3.12.11 下 T07 定向测试 `25 passed`、T02/T05 回归 `41 passed`、全量 `112 passed`；Ruff lint/format、`python -m build`、workflow validator、官方 SDK + `httpx.MockTransport` 的 429/401/context overflow/凭据对抗脚本与 `git diff --check` 均通过。未执行真实网关调用，也未接入 Agent Loop 或 compaction。
 
 ## 阶段 C：可运行核心闭环与上下文管理
 

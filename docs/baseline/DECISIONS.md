@@ -62,3 +62,9 @@
 - 选择：`SessionStore` 作为 `EventEmitter` 的唯一首要订阅者，负责分配 sequence、安全 JSON 化、payload 按 UTF-8 字节上限替换为带原始长度的头尾预览，并以 append + flush + 默认 `fsync` 完成后返回 canonical `EventEnvelope`；随后其他订阅者只消费这一 envelope。单个非 Store 订阅者失败时继续尝试其余订阅者，最后用不含异常消息的聚合报告区分 success/failed；Store 失败时因无 canonical sequence，后续订阅者显式标记 skipped。
 - 理由与替代：由 Emitter 或多个订阅者各自分配 sequence 会产生两个事实源；在 Store 成功前渲染未持久化事件会让 UI 与审计轨迹分叉。未知厂商对象统一替换为固定占位符，而不调用其 `str`/`repr`；这比通用 `default=str` 更能防止 SDK 对象或异常携带凭据落盘。
 - 后果：T05 `ToolLifecycleEvent` 可不修改 Executor 直接适配；T08/T10 只需注入同一 Emitter。订阅失败不会被伪装为全部成功，但 Store 已成功的事实也不因 renderer 失败而回滚；已损坏的尾行只诊断、不自动修复，业务恢复仍属于 T11。
+
+## 2026-08-29 — T07 模型传输重试与归一化边界
+
+- 选择：`OpenAICompatibleModelClient` 使用官方 OpenAI Chat Completions client 作为唯一 SDK 边界，并以 `max_retries=0` 关闭 SDK 内部重试；项目自身只对网络/超时、429、408/500/502/503/504 做可注入且最多配置次数的指数退避。认证、权限、模型不存在、其他 5xx、非法请求和配置错误立即失败；上下文窗口超限单独标为 `context_overflow` 交由后续 Context/Loop 决策。
+- 理由与替代：把重试计数集中在项目层可解释且避免 SDK 与项目策略叠加；只选择可明确视为瞬时故障的状态码，避免对模型/请求错误盲目重试。模型响应使用无内部 correlation ID 的 `Normalized*` DTO，合法 provider ID 和原始 JSON arguments 保持顺序并把坏 ID/参数转为稳定诊断，让后续协议边界生成内部 correlation ID。
+- 安全后果：只把稳定分类、状态码和安全诊断写入异常/日志；不保留 provider response、headers 或原始 SDK exception。文本和 arguments 在归一化边界按字段/inline 规则脱敏，未知对象不调用 `str`/`repr`；`httpx.MockTransport`/fake client 仅证明本项目离线逻辑，不证明真实网关兼容。
