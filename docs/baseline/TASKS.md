@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05、T06、T07 已接受
+> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05、T06、T07、T08 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T05 已完成，本轮未授权继续派发后续任务。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T08 已完成，本轮未授权继续派发后续任务。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -152,7 +152,7 @@ flowchart TD
 
 ## 阶段 C：可运行核心闭环与上下文管理
 
-### [ ] T08 — 交付可独立实例化、有界的 Agent Loop
+### [x] T08 — 交付可独立实例化、有界的 Agent Loop
 
 **依赖:** T03, T05, T06, T07  
 **范围:** 通过显式 ModelClient、ToolRegistry、EventEmitter 和 AgentRuntime 实现 LLM→tools→results 循环、状态机、串行多调用、预算、协议错误上限、中断和异常结束。Loop 只面向 active Tool 通用协议，并在组装时保证 Runtime 与 Registry active view 一致。先使用简单未压缩 Context Builder；排除自动 compaction、CLI、session 恢复与任何 Skill/MCP 具体实现。
@@ -167,6 +167,8 @@ flowchart TD
 - Loop 创建时若 `AgentRuntime.active_tools` 与 Registry active view 不一致则在任何模型或工具副作用前失败，消除两个可变 active 事实源。
 
 **验证:** `python -m pytest tests/integration/test_agent_loop.py tests/integration/test_agent_limits.py tests/integration/test_runtime_isolation.py`; `python -m ruff check src/coding_agent_neo/agent_loop.py tests/integration`。
+
+**完成摘要（2026-08-29）:** 已交付显式注入 `ModelClient`/`ToolRegistry`/`EventEmitter`/`AgentRuntime` 的同步串行 Agent Loop、简单未压缩上下文投影、交互 follow-up 生命周期、预算/连续协议错误/墙钟上限、中断与异常结束、Runtime 隔离及 active-tool 双事实源前置拒绝；内置工具与显式注入的非内置 fake Tool 共用同一协议路径。主 Agent 首轮验收退回了批次终止时未配对 tool call 与 Store-first 失败被吞掉的缺口；修正后，所有已持久化声明调用都有唯一关联结果，未执行调用以 `executed=false` 无副作用闭合，工具生命周期主 Store 写失败则 fail-closed，仅 renderer 失败不否定已持久化事实。Python 3.12.11 `.venv` 中主 Agent 独立复验 T08 定向 `20 passed`、T05/T06 回归 `45 passed`、全量 `134 passed`，Ruff lint/format-check、`python -m build`、workflow validator、配对/Store 失败对抗脚本、静态边界扫描与 `git diff --check` 均通过；证据仅基于 scripted fake model/environment，未执行真实网关、CLI、compaction、resume 或跨平台验证。
 
 ### [ ] T09 — 交付按 Runtime 隔离的上下文预算与增量压缩
 

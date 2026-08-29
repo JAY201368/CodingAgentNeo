@@ -68,3 +68,15 @@
 - 选择：`OpenAICompatibleModelClient` 使用官方 OpenAI Chat Completions client 作为唯一 SDK 边界，并以 `max_retries=0` 关闭 SDK 内部重试；项目自身只对网络/超时、429、408/500/502/503/504 做可注入且最多配置次数的指数退避。认证、权限、模型不存在、其他 5xx、非法请求和配置错误立即失败；上下文窗口超限单独标为 `context_overflow` 交由后续 Context/Loop 决策。
 - 理由与替代：把重试计数集中在项目层可解释且避免 SDK 与项目策略叠加；只选择可明确视为瞬时故障的状态码，避免对模型/请求错误盲目重试。模型响应使用无内部 correlation ID 的 `Normalized*` DTO，合法 provider ID 和原始 JSON arguments 保持顺序并把坏 ID/参数转为稳定诊断，让后续协议边界生成内部 correlation ID。
 - 安全后果：只把稳定分类、状态码和安全诊断写入异常/日志；不保留 provider response、headers 或原始 SDK exception。文本和 arguments 在归一化边界按字段/inline 规则脱敏，未知对象不调用 `str`/`repr`；`httpx.MockTransport`/fake client 仅证明本项目离线逻辑，不证明真实网关兼容。
+
+## 2026-08-29 — T08 Loop 默认有界且按下一动作检查额度
+
+- 选择：当组装层没有为 Runtime 指定对应上限时，T08 Loop 使用 `32` model steps、`64` tool calls、`3` 个连续协议错误和 `900` 秒墙钟的有界默认值；显式 Runtime 限制始终优先。model-step/墙钟额度在再次请求模型前检查，tool-call 额度在实际执行下一项声明调用前检查，因此用完最后一次工具额度后仍允许模型在其他预算内给出总结。
+- 理由与替代：`BudgetTracker` 的 `None` 便于底层契约独立构造，但 Loop 若沿用全部 `None` 会失去“不会无限循环”的产品保证；在刚好完成允许的最后一次工具后立即终止又会阻止模型返回当前成果总结。连续协议错误在任一协议合法调用后清零；单条命令 timeout 仍按 FR-26 作为普通 `ToolResult` 交给模型处理，不与 Agent 墙钟终止混为一谈。
+- 后果：T10 组装显式配置时覆盖这些默认值；T09 可以替换简单 Context Builder，但不得把工具额度或协议错误状态移出当前 Runtime。默认值调整属于配置层兼容变更，应同步测试和用户文档。
+
+## 2026-08-29 — T08 已声明 Tool Call 是必须闭合的事实义务
+
+- 选择：assistant 事件一旦持久化，其全部 tool calls 都必须按声明顺序得到同 correlation 的 `tool_call`、`policy_decision` 和唯一 `tool_result`。若 tool-call/protocol/wall 限额、取消、active-view 漂移或系统失败使剩余调用不能执行，Loop 通过 `ToolExecutor.skip()` 发布 `executed=false`、带具体原因的非成功结果，不进入 Registry dispatch、Policy 执行或 Environment 副作用。
+- Store-first 语义：`ToolExecutor` 新增默认关闭的 strict event publishing；T05 原有调用方继续把 observer 失败记录到 `event_errors` 而不改变执行。T08 使用适配器只在主 Store 没有产生 canonical event 时触发 strict 失败，因此 tool_call 持久化失败会在工具副作用前令 Loop `FAILED`，Store 已成功而 renderer 失败则继续。
+- 理由与后果：删除 assistant call 或只停止循环会使 JSONL 无法还原调用结果，继续执行又会越过预算/取消；显式未执行结果同时保持事实完整和无副作用终止。未来恢复和 compaction 可以依赖 assistant tool-call group 已闭合；若 Store 本身不可写，只能 fail-closed 并尽力写结束事件，不能伪造已持久化事实。

@@ -5,9 +5,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+import pytest
 from tests.unit.fake_environment import FakeExecutionEnvironment
 
-from coding_agent_neo.executor import EventRecorder, ToolExecutor
+from coding_agent_neo.executor import (
+    EventRecorder,
+    ToolEventPublicationError,
+    ToolExecutor,
+)
 from coding_agent_neo.models import ToolResult, ToolResultStatus
 from coding_agent_neo.policy import CallbackApprovalPort, DefaultExecutionPolicy
 from coding_agent_neo.runtime import AgentRuntime
@@ -253,3 +258,86 @@ def test_event_ids_use_runtime_factory_and_remain_unique() -> None:
     assert event_ids == ["event-injected", "event-injected_1", "event-injected_2"]
     assert len(event_ids) == len(set(event_ids))
     assert factory_calls == ["correlation", "event", "event", "event"]
+
+
+def test_event_failure_is_backward_compatible_by_default_but_strict_when_requested() -> None:
+    class FailingPublisher:
+        calls = 0
+
+        def publish(self, event) -> None:
+            del event
+            self.calls += 1
+            raise OSError("PRIVATE-PUBLISHER-DETAIL")
+
+    default_environment = FakeExecutionEnvironment()
+    default_runtime = AgentRuntime(
+        "agent-default-events",
+        "session-default-events",
+        default_environment,
+        DefaultExecutionPolicy(),
+    )
+    default_publisher = FailingPublisher()
+    default_executor = ToolExecutor(
+        default_runtime,
+        default_tool_registry(),
+        event_publisher=default_publisher,
+    )
+
+    result = default_executor.execute("read_file", {"path": "a.py"})
+
+    assert result.status is ToolResultStatus.SUCCESS
+    assert [call.operation for call in default_environment.calls] == ["read_file"]
+    assert default_executor.event_errors == ["OSError", "OSError", "OSError"]
+
+    strict_environment = FakeExecutionEnvironment()
+    strict_runtime = AgentRuntime(
+        "agent-strict-events",
+        "session-strict-events",
+        strict_environment,
+        DefaultExecutionPolicy(),
+    )
+    strict_publisher = FailingPublisher()
+    strict_executor = ToolExecutor(
+        strict_runtime,
+        default_tool_registry(),
+        event_publisher=strict_publisher,
+        strict_event_publishing=True,
+    )
+
+    with pytest.raises(ToolEventPublicationError) as caught:
+        strict_executor.execute("read_file", {"path": "a.py"})
+
+    assert caught.value.error_type == "OSError"
+    assert "PRIVATE-PUBLISHER-DETAIL" not in str(caught.value)
+    assert strict_environment.calls == []
+    assert strict_publisher.calls == 1
+
+
+def test_skip_publishes_complete_lifecycle_without_environment_dispatch() -> None:
+    environment = FakeExecutionEnvironment()
+    runtime = AgentRuntime(
+        "agent-skip",
+        "session-skip",
+        environment,
+        DefaultExecutionPolicy(),
+    )
+    events = EventRecorder()
+    executor = ToolExecutor(runtime, default_tool_registry(), event_publisher=events)
+
+    result = executor.skip(
+        "read_file",
+        {"path": "a.py"},
+        reason="tool_calls",
+        correlation_id="correlation-skip",
+        provider_tool_call_id="provider-skip",
+    )
+
+    assert result.status is ToolResultStatus.DENIED
+    assert result.metadata["executed"] is False
+    assert environment.calls == []
+    assert [event.type for event in events.events] == [
+        "tool_call",
+        "policy_decision",
+        "tool_result",
+    ]
+    assert {event.correlation_id for event in events.events} == {"correlation-skip"}

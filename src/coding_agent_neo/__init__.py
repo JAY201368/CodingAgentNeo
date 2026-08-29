@@ -1,5 +1,13 @@
 """CodingAgentNeo public domain contracts and package metadata."""
 
+from coding_agent_neo.agent_loop import (
+    ActiveToolsMismatchError,
+    AgentLoop,
+    AgentLoopResult,
+    LoopClosedError,
+    SimpleContextBuilder,
+    TurnResult,
+)
 from coding_agent_neo.events import (
     DeliveryStatus,
     EmissionReport,
@@ -96,7 +104,10 @@ from coding_agent_neo.session import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "ActiveToolsMismatchError",
     "AgentId",
+    "AgentLoop",
+    "AgentLoopResult",
     "AgentRuntime",
     "BudgetTracker",
     "CancelledError",
@@ -131,6 +142,7 @@ __all__ = [
     "LimitReason",
     "ListFilesRequest",
     "ListResult",
+    "LoopClosedError",
     "ModelClient",
     "ModelClientError",
     "ModelError",
@@ -166,12 +178,14 @@ __all__ = [
     "SessionReadResult",
     "SessionStore",
     "SessionWriteError",
+    "SimpleContextBuilder",
     "IncompleteSessionTailError",
     "SubscriberDelivery",
     "ToolCall",
     "ToolExecutionContext",
     "ToolResult",
     "ToolResultStatus",
+    "TurnResult",
     "Usage",
     "WriteFileRequest",
     "WriteFileResult",

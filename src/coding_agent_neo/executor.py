@@ -55,6 +55,7 @@ _SENSITIVE_KEY = re.compile(
     r"(?:secret|token|password|passwd|api[_-]?key|authorization|credential|cookie|private[_-]?key)",
     re.IGNORECASE,
 )
+_SAFE_SKIP_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _json_safe(value: Any) -> Any:
@@ -181,6 +182,14 @@ class EventPublisher(Protocol):
 
 EventSink = EventPublisher
 EventEmitter = EventPublisher
+
+
+class ToolEventPublicationError(RuntimeError):
+    """Strict publication failed without retaining an observer's message."""
+
+    def __init__(self, error_type: str) -> None:
+        self.error_type = error_type
+        super().__init__("tool lifecycle event could not be published")
 
 
 @dataclass(slots=True)
@@ -472,6 +481,7 @@ class ToolExecutor:
         model_output_limit: int | None = None,
         output_limit: int | None = None,
         non_interactive: bool | None = None,
+        strict_event_publishing: bool = False,
     ) -> None:
         # Accept the equally natural ``ToolExecutor(registry, runtime)``
         # ordering while keeping the documented runtime-first form.
@@ -511,6 +521,9 @@ class ToolExecutor:
         self.policy = policy if policy is not None else runtime.execution_policy
         self.approval_port = approval_port
         self.event_publisher = event_publisher
+        if not isinstance(strict_event_publishing, bool):
+            raise TypeError("strict_event_publishing must be a boolean")
+        self.strict_event_publishing = strict_event_publishing
         self._id_factory_explicit = id_factory is not None
         self.id_factory = id_factory if id_factory is not None else runtime.id_factory
         if not callable(clock):
@@ -553,6 +566,8 @@ class ToolExecutor:
         self._issued_correlations: set[CorrelationId] = set()
         self._issued_event_ids: set[EventId] = set()
         self.event_errors: list[str] = []
+        self.last_result: ToolResult | None = None
+        self.last_result_published = False
 
     @property
     def correlation_ids(self) -> frozenset[CorrelationId]:
@@ -639,6 +654,8 @@ class ToolExecutor:
             # type-only diagnostic for callers that want to inspect failures;
             # do not expose the exception message or payload values.
             self.event_errors.append(type(exc).__name__)
+            if self.strict_event_publishing:
+                raise ToolEventPublicationError(type(exc).__name__) from None
 
     def _emit(
         self,
@@ -838,6 +855,8 @@ class ToolExecutor:
         injected factory, receive a fresh executor-owned ID.
         """
 
+        self.last_result = None
+        self.last_result_published = False
         try:
             started = self.clock()
         except Exception:
@@ -1109,10 +1128,83 @@ class ToolExecutor:
                 name=name,
                 duration_seconds=elapsed,
             )
+            self.last_result = result
             self._result_event(name, result)
+            self.last_result_published = True
         # ``finally`` always assigns a ToolResult, but retaining this guard
         # keeps static type checkers and unusual interpreter exits honest.
         assert result is not None
+        return result
+
+    def skip(
+        self,
+        tool_name: str,
+        arguments: str | Mapping[str, Any],
+        *,
+        reason: str,
+        status: ToolResultStatus = ToolResultStatus.DENIED,
+        provider_tool_call_id: ProviderToolCallId | str | None = None,
+        correlation_id: CorrelationId | str | None = None,
+    ) -> ToolResult:
+        """Publish one complete lifecycle without executing a Tool.
+
+        Agent-level limits and cancellation can occur after an assistant
+        response has declared several calls.  This method pairs each remaining
+        declaration with explicit call/policy/result facts while guaranteeing
+        that Registry dispatch and Environment side effects are not reached.
+        """
+
+        self.last_result = None
+        self.last_result_published = False
+        if not isinstance(reason, str) or _SAFE_SKIP_REASON.fullmatch(reason) is None:
+            raise ValueError("skip reason must be a stable lowercase code")
+        try:
+            result_status = ToolResultStatus(status)
+        except (TypeError, ValueError):
+            raise ValueError("skip status must be a ToolResultStatus") from None
+        if result_status is ToolResultStatus.SUCCESS:
+            raise ValueError("a skipped tool call cannot have success status")
+
+        name = _safe_name(tool_name, self.registry)
+        if correlation_id is None:
+            operation_id = self._new_correlation_id()
+        else:
+            try:
+                operation_id = CorrelationId(correlation_id)
+            except (TypeError, ValueError):
+                operation_id = self._new_correlation_id()
+            else:
+                # ``skip`` completes a declaration whose correlation was
+                # assigned before dispatch.  Preserve it even when an earlier
+                # strict publication attempt reserved the same ID but failed.
+                self._issued_correlations.add(operation_id)
+        provider_id, _provider_valid = _safe_provider(provider_tool_call_id)
+        safe_reason = reason[:160]
+        self._tool_call_event(name, arguments, operation_id, provider_id)
+        self._policy_event(
+            name,
+            operation_id,
+            provider_id,
+            requested=PolicyDecision.DENY,
+            decision=PolicyDecision.DENY,
+            approved=None,
+            reason=f"not_executed_{safe_reason}"[:160],
+        )
+        result = ToolResult(
+            correlation_id=operation_id,
+            provider_tool_call_id=provider_id,
+            status=result_status,
+            text=f"tool call was not executed: {safe_reason}",
+            metadata={
+                "error_code": "not_executed",
+                "reason": safe_reason,
+                "executed": False,
+                "tool_name": name,
+            },
+        )
+        self.last_result = result
+        self._result_event(name, result)
+        self.last_result_published = True
         return result
 
     execute_tool = execute
@@ -1136,6 +1228,7 @@ __all__ = [
     "InMemoryEventPublisher",
     "RecordingEventPublisher",
     "ToolExecutionError",
+    "ToolEventPublicationError",
     "ToolExecutor",
     "ToolLifecycleEvent",
 ]
