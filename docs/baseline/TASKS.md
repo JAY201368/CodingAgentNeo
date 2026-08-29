@@ -1,6 +1,6 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05 已接受
+> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05、T06 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
@@ -119,7 +119,7 @@ flowchart TD
 
 **完成摘要（2026-08-28）:** 已交付 fail-closed `DefaultExecutionPolicy`、交互/非交互 approval port、`ToolExecutor` 单调用生命周期与可由 T06 适配的最小事件发布端口；覆盖安全相对路径 allow、bash ask/auto/yolo/deny、策略/审批异常拒绝、唯一内部 correlation ID、独立 provider ID、参数校验、拒绝/普通失败/意外异常归一化及每次调用恰好一个 `ToolResult`/`tool_result` 事件。主 Agent 对抗验收时退回修复了不受信任工具名/参数键/validator path 的诊断泄漏，以及 lifecycle event ID 绕过 Runtime ID factory 的问题。Python 3.12.11 下定向测试 `24 passed`、全量 `68 passed`，敏感哨兵与注入 ID 对抗脚本、Ruff lint/format、`python -m build`、workflow validator、依赖边界扫描与 `git diff --check` 均通过；未实现 T06 持久化/扇出、CLI、Agent Loop 或真实 Local 集成。
 
-### [ ] T06 — 交付 append-only Session Store 与事件扇出
+### [x] T06 — 交付 append-only Session Store 与事件扇出
 
 **依赖:** T02  
 **范围:** 实现 EventEmitter、Session Store 的统一 sequence 分配、JSONL append/flush/有界持久化、订阅扇出和安全序列化；可读取完整记录并诊断损坏尾行。排除上下文投影、CLI 展示和业务恢复。  
@@ -132,6 +132,8 @@ flowchart TD
 - 尾部不完整行被定位和报告，之前的完整事件仍可读取。
 
 **验证:** `python -m pytest tests/unit/test_events.py tests/unit/test_session_store.py tests/security/test_event_redaction.py`; `python -m ruff check src/coding_agent_neo/events.py src/coding_agent_neo/session.py tests`。
+
+**完成摘要（2026-08-29）:** 已交付 Store-first `EventEmitter`、统一 sequence/event ID 管理、append-only UTF-8 JSONL `SessionStore`、逐事件 flush/默认 `fsync`、安全 JSON 化与敏感字段递归脱敏、UTF-8 字节上限内的 payload 头尾预览、同步订阅扇出和逐订阅者 success/failed/skipped 报告，以及完整记录读取和损坏尾行定位。T05 `ToolLifecycleEvent` 可直接适配为 canonical `EventEnvelope`；主 Agent 审查时修复了 usage 的 `input_tokens`/`output_tokens` 被误判为凭据的问题，同时保持 access/generic token 字段脱敏。Python 3.12.11 下定向测试 `19 passed`、T02/T05 回归矩阵 `41 passed`、全量 `87 passed`；Ruff lint/format、`python -m build`、workflow validator、独立凭据/截断/重开/部分扇出失败对抗脚本与 `git diff --check` 均通过。上下文投影、CLI/renderer 具体展示、业务恢复和 Agent Loop 保持未实现。
 
 ### [ ] T07 — 交付 OpenAI-compatible 模型访问与有界重试
 

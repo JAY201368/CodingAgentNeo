@@ -56,3 +56,9 @@
 - 理由与替代：Pi 的小核心思路表明 Skill 属于上下文组装，MCP 可以适配为 Tool；为两者预先建立具体模块、生命周期或配置面会扩大首版范围并降低可解释性。
 - 安全边界：工作区文件、搜索和通用命令仍只经 `ExecutionEnvironment`。未来显式外部 Tool adapter 可拥有其协议必需的专用传输，但不得成为任意宿主文件、通用 shell、凭据泄漏或 Policy/事件绕过通道。
 - 后果：T01～T05 保持已接受且无代码返工；T08 用注入的非内置 fake Tool 证明 Loop 来源无感，T09 证明显式 system prompt 被预算与 compaction 完整保留，但这些 fake 证据不得表述为 Skill/MCP 已集成。本决策对“v1.1 是当前版本”的历史状态作出 supersede，但不改变单一权威需求正文的文档策略。
+
+## 2026-08-29 — T06 Store-first 事件序列化与安全扇出
+
+- 选择：`SessionStore` 作为 `EventEmitter` 的唯一首要订阅者，负责分配 sequence、安全 JSON 化、payload 按 UTF-8 字节上限替换为带原始长度的头尾预览，并以 append + flush + 默认 `fsync` 完成后返回 canonical `EventEnvelope`；随后其他订阅者只消费这一 envelope。单个非 Store 订阅者失败时继续尝试其余订阅者，最后用不含异常消息的聚合报告区分 success/failed；Store 失败时因无 canonical sequence，后续订阅者显式标记 skipped。
+- 理由与替代：由 Emitter 或多个订阅者各自分配 sequence 会产生两个事实源；在 Store 成功前渲染未持久化事件会让 UI 与审计轨迹分叉。未知厂商对象统一替换为固定占位符，而不调用其 `str`/`repr`；这比通用 `default=str` 更能防止 SDK 对象或异常携带凭据落盘。
+- 后果：T05 `ToolLifecycleEvent` 可不修改 Executor 直接适配；T08/T10 只需注入同一 Emitter。订阅失败不会被伪装为全部成功，但 Store 已成功的事实也不因 renderer 失败而回滚；已损坏的尾行只诊断、不自动修复，业务恢复仍属于 T11。
