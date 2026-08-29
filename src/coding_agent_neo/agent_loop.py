@@ -2,9 +2,9 @@
 
 The loop owns orchestration only.  Model access, tool registration and
 execution, event persistence, policy, cancellation, and environment side
-effects remain behind their existing boundaries.  Context construction is a
-deliberately simple, uncompressed projection for T08; T09 replaces that
-projection without changing the loop's tool protocol.
+effects remain behind their existing boundaries. Context construction and
+compaction are explicit Runtime-local dependencies and do not change the
+loop's source-agnostic tool protocol.
 """
 
 from __future__ import annotations
@@ -17,11 +17,19 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from coding_agent_neo.compactor import CompactionOutcome, Compactor
+from coding_agent_neo.context import (
+    ContextBuilder,
+    ContextWindowExceeded,
+    SimpleContextBuilder,
+    detach_message,
+)
 from coding_agent_neo.events import EventDispatchError, EventEmitter, PendingEvent
 from coding_agent_neo.executor import ToolExecutor
 from coding_agent_neo.model_client import ModelClient, ModelClientError
 from coding_agent_neo.models import (
     CorrelationId,
+    EventEnvelope,
     EventType,
     NormalizedAssistantResponse,
     NormalizedToolCall,
@@ -60,6 +68,14 @@ class LoopClosedError(RuntimeError):
     """A turn was requested after the Loop had closed its session."""
 
 
+class _LoopLimitReached(RuntimeError):
+    """Context preparation exhausted an existing per-Runtime limit."""
+
+    def __init__(self, reason: LimitReason) -> None:
+        self.reason = reason
+        super().__init__(reason.value)
+
+
 @dataclass(frozen=True, slots=True)
 class AgentLoopResult:
     """Observable outcome of one Agent turn."""
@@ -85,27 +101,6 @@ class AgentLoopResult:
 
 
 TurnResult = AgentLoopResult
-
-
-@dataclass(frozen=True, slots=True)
-class SimpleContextBuilder:
-    """Build a detached, uncompressed context for exactly one Runtime."""
-
-    system_prompt: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.system_prompt, str):
-            raise TypeError("system_prompt must be a string")
-
-    def build(self, runtime: AgentRuntime) -> list[dict[str, Any]]:
-        if not isinstance(runtime, AgentRuntime):
-            raise TypeError("runtime must be an AgentRuntime")
-        messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
-        for message in runtime.context_state.recent_messages:
-            if not isinstance(message, Mapping):
-                raise TypeError("context messages must be mappings")
-            messages.append(_detach_message(message))
-        return messages
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,30 +145,20 @@ class _StoreFirstToolEventPublisher:
 
     def __init__(self, emitter: EventEmitter) -> None:
         self._emitter = emitter
+        self.last_sequence: int | None = None
 
     def publish(self, event: Any) -> None:
+        self.last_sequence = None
         try:
-            self._emitter.publish(event)
+            report = self._emitter.publish(event)
         except EventDispatchError as exc:
             if exc.report.event is None:
                 raise
-
-
-def _detach_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _detach_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_detach_value(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    raise TypeError("context messages must contain JSON-compatible values")
-
-
-def _detach_message(message: Mapping[str, Any]) -> dict[str, Any]:
-    detached = _detach_value(message)
-    if not isinstance(detached, dict):  # pragma: no cover - Mapping always becomes dict.
-        raise TypeError("context message must be an object")
-    return detached
+            self.last_sequence = exc.report.event.sequence
+            return
+        if report.event is None:  # pragma: no cover - a successful Store returns an event.
+            raise RuntimeError("tool event publication returned no canonical event")
+        self.last_sequence = report.event.sequence
 
 
 class AgentLoop:
@@ -197,7 +182,13 @@ class AgentLoop:
         approval_port: Any | None = None,
         interactive: bool = True,
         model_output_limit: int | None = None,
-        context_builder: SimpleContextBuilder | None = None,
+        context_builder: ContextBuilder | None = None,
+        compactor: Compactor | None = None,
+        context_window: int = 128_000,
+        reserved_output_tokens: int = 4_096,
+        compaction_threshold: float = 0.85,
+        keep_recent_groups: int = 2,
+        max_compactions_per_request: int = 8,
     ) -> None:
         if not callable(getattr(model_client, "complete", None)):
             raise TypeError("model_client must provide complete")
@@ -211,6 +202,12 @@ class AgentLoop:
             raise TypeError("interactive must be a boolean")
         if model_parameters is not None and not isinstance(model_parameters, Mapping):
             raise TypeError("model_parameters must be a mapping or None")
+        if (
+            isinstance(max_compactions_per_request, bool)
+            or not isinstance(max_compactions_per_request, int)
+            or max_compactions_per_request < 1
+        ):
+            raise ValueError("max_compactions_per_request must be a positive integer")
 
         self._validate_active_view(runtime, registry)
         store_session_id = getattr(event_emitter.store, "session_id", None)
@@ -221,10 +218,33 @@ class AgentLoop:
         self.registry = registry
         self.event_emitter = event_emitter
         self.runtime = runtime
-        self.context_builder = context_builder or SimpleContextBuilder(system_prompt)
+        self.context_builder = context_builder or ContextBuilder(
+            system_prompt,
+            context_window=context_window,
+            reserved_output_tokens=reserved_output_tokens,
+            compaction_threshold=compaction_threshold,
+            keep_recent_groups=keep_recent_groups,
+        )
         if self.context_builder.system_prompt != system_prompt:
             raise ValueError("context_builder and explicit system_prompt disagree")
         self.model_parameters = dict(model_parameters or {})
+        self.compactor = compactor or Compactor(
+            model_client,
+            system_prompt=system_prompt,
+            context_window=self.context_builder.context_window,
+            reserved_output_tokens=self.context_builder.reserved_output_tokens,
+            estimator=self.context_builder.estimator,
+            model_parameters=self.model_parameters,
+        )
+        if self.compactor.system_prompt != system_prompt:
+            raise ValueError("compactor and explicit system_prompt disagree")
+        if (
+            self.compactor.context_window != self.context_builder.context_window
+            or self.compactor.reserved_output_tokens != self.context_builder.reserved_output_tokens
+            or self.compactor.estimator != self.context_builder.estimator
+        ):
+            raise ValueError("compactor and context_builder budget configuration disagree")
+        self.max_compactions_per_request = max_compactions_per_request
         self.model_output_limit = model_output_limit
         self.state = RuntimeState.RUNNING
         self._session_started = False
@@ -236,12 +256,13 @@ class AgentLoop:
         stateful_approval = (
             None if approval_port is None else _StatefulApprovalPort(self, approval_port)
         )
+        self._tool_event_publisher = _StoreFirstToolEventPublisher(event_emitter)
         self.tool_executor = ToolExecutor(
             runtime,
             registry,
             approval_port=stateful_approval,
             interactive=interactive,
-            event_publisher=_StoreFirstToolEventPublisher(event_emitter),
+            event_publisher=self._tool_event_publisher,
             model_output_limit=model_output_limit,
             strict_event_publishing=True,
         )
@@ -320,7 +341,7 @@ class AgentLoop:
         *,
         correlation_id: CorrelationId | None = None,
         provider_tool_call_id: str | None = None,
-    ) -> None:
+    ) -> EventEnvelope:
         event = self._pending_event(
             event_type,
             payload,
@@ -328,12 +349,16 @@ class AgentLoop:
             provider_tool_call_id=provider_tool_call_id,
         )
         try:
-            self.event_emitter.publish(event)
+            report = self.event_emitter.publish(event)
         except EventDispatchError as exc:
             # The canonical fact exists when only a renderer/observer failed.
             # A Store failure has no sequence and must end the Loop.
             if exc.report.event is None:
                 raise
+            return exc.report.event
+        if report.event is None:  # pragma: no cover - successful Store contract.
+            raise RuntimeError("event publication returned no canonical event")
+        return report.event
 
     def _emit_best_effort(
         self,
@@ -408,8 +433,16 @@ class AgentLoop:
     def __exit__(self, *_exc_info: Any) -> None:
         self.close()
 
-    def _append_message(self, message: Mapping[str, Any]) -> None:
-        self.runtime.context_state.recent_messages.append(_detach_message(message))
+    def _append_message(
+        self,
+        message: Mapping[str, Any],
+        *,
+        sequence: int | None,
+    ) -> None:
+        self.runtime.context_state.append_message(
+            detach_message(message),
+            sequence=sequence,
+        )
 
     def _plan_calls(self, calls: Sequence[NormalizedToolCall]) -> tuple[_PlannedToolCall, ...]:
         plans: list[_PlannedToolCall] = []
@@ -522,7 +555,10 @@ class AgentLoop:
                 provider_tool_call_id=plan.call.provider_tool_call_id,
                 correlation_id=plan.correlation_id,
             )
-            self._append_message(self._tool_message(result, plan.context_tool_call_id))
+            self._append_message(
+                self._tool_message(result, plan.context_tool_call_id),
+                sequence=self._tool_event_publisher.last_sequence,
+            )
 
     def _consume_published_result(self, pending_plans: list[_PlannedToolCall]) -> None:
         """Consume a result published while a BaseException unwound execution."""
@@ -534,7 +570,10 @@ class AgentLoop:
         if result is None or result.correlation_id != plan.correlation_id:
             return
         pending_plans.pop(0)
-        self._append_message(self._tool_message(result, plan.context_tool_call_id))
+        self._append_message(
+            self._tool_message(result, plan.context_tool_call_id),
+            sequence=self._tool_event_publisher.last_sequence,
+        )
 
     def _check_active_view(self) -> None:
         self._validate_active_view(self.runtime, self.registry)
@@ -571,6 +610,158 @@ class AgentLoop:
         self.runtime.budget.record_tokens(
             input_tokens=usage.input_tokens or 0,
             output_tokens=usage.output_tokens or 0,
+        )
+
+    def _record_compaction_usage(self, outcome: CompactionOutcome) -> None:
+        usage = outcome.usage
+        if usage is None:
+            return
+        self.runtime.budget.record_tokens(
+            input_tokens=usage.input_tokens or 0,
+            output_tokens=usage.output_tokens or 0,
+        )
+
+    def _check_context_preparation_allowed(self) -> None:
+        self._check_interrupt()
+        budget = self.runtime.budget
+        if budget.deadline is not None and budget.clock() >= budget.deadline:
+            raise _LoopLimitReached(LimitReason.WALL_TIME)
+
+    def _emit_compaction(
+        self,
+        outcome: CompactionOutcome,
+        *,
+        degraded_through_sequence: int | None = None,
+    ) -> None:
+        self._emit(
+            EventType.COMPACTION,
+            {
+                "status": "success" if outcome.succeeded else "failed",
+                "forced": outcome.forced,
+                "source_start_sequence": outcome.source_start_sequence,
+                "source_end_sequence": outcome.source_end_sequence,
+                "covered_through_sequence": self.runtime.context_state.covered_through_sequence,
+                "degraded_through_sequence": degraded_through_sequence,
+                "summary": outcome.summary,
+                "error_type": outcome.error_type,
+                "reason": outcome.reason,
+            },
+        )
+
+    def _compact_once(self, *, forced: bool) -> bool:
+        self._check_context_preparation_allowed()
+        plan = self.context_builder.plan_compaction(self.runtime, forced=forced)
+        if plan is None:
+            return False
+        state = self.runtime.context_state
+        previous_projection_state = (
+            state.latest_summary,
+            state.covered_through_sequence,
+            state.degraded_through_sequence,
+            state.degraded_notice,
+        )
+
+        def restore_projection_state() -> None:
+            (
+                state.latest_summary,
+                state.covered_through_sequence,
+                state.degraded_through_sequence,
+                state.degraded_notice,
+            ) = previous_projection_state
+
+        outcome = self.compactor.compact(self.runtime, plan)
+        self._record_compaction_usage(outcome)
+        if outcome.succeeded:
+            try:
+                self._emit_compaction(outcome)
+            except BaseException:
+                restore_projection_state()
+                raise
+            self._check_context_preparation_allowed()
+            return True
+
+        selected_groups = tuple(
+            group for group in plan.groups if group.end_sequence <= outcome.source_end_sequence
+        )
+        if not selected_groups:
+            selected_groups = (plan.groups[0],)
+        fallback_plan = type(plan)(
+            old_summary=plan.old_summary,
+            groups=selected_groups,
+            forced=plan.forced,
+            previous_covered_sequence=plan.previous_covered_sequence,
+        )
+        self.context_builder.apply_degraded_fallback(self.runtime, fallback_plan)
+        try:
+            self._emit_compaction(
+                outcome,
+                degraded_through_sequence=self.runtime.context_state.degraded_through_sequence,
+            )
+        except BaseException:
+            restore_projection_state()
+            raise
+        self._check_context_preparation_allowed()
+        return False
+
+    def _prepare_context(self, *, forced: bool = False) -> list[dict[str, Any]]:
+        schemas = self.registry.active_schemas()
+        self._check_context_preparation_allowed()
+        if forced:
+            self._compact_once(forced=True)
+            projection = self.context_builder.project(self.runtime, schemas)
+            if projection.estimate.exceeds_window:
+                raise ContextWindowExceeded(
+                    projection.estimate,
+                    reason="context_window_exceeded_after_forced_compaction",
+                )
+            return projection.as_messages()
+
+        for _attempt in range(self.max_compactions_per_request):
+            self._check_context_preparation_allowed()
+            projection = self.context_builder.project(self.runtime, schemas)
+            if not projection.estimate.needs_compaction:
+                return projection.as_messages()
+            if not self._compact_once(forced=False):
+                fallback = self.context_builder.project(self.runtime, schemas)
+                if fallback.estimate.exceeds_window:
+                    raise ContextWindowExceeded(
+                        fallback.estimate,
+                        reason="context_window_exceeded_after_compaction_fallback",
+                    )
+                return fallback.as_messages()
+
+        projection = self.context_builder.project(self.runtime, schemas)
+        if projection.estimate.needs_compaction:
+            raise ContextWindowExceeded(
+                projection.estimate,
+                reason="context_compaction_attempt_limit_reached",
+            )
+        return projection.as_messages()
+
+    def _complete_model_request(self) -> NormalizedAssistantResponse:
+        schemas = self.registry.active_schemas()
+        messages = self._prepare_context()
+        self._check_context_preparation_allowed()
+        try:
+            return self.model_client.complete(messages, schemas, self.model_parameters)
+        except ModelClientError as error:
+            if not error.context_overflow:
+                raise
+        self._emit(
+            EventType.RETRY,
+            {
+                "reason": "context_overflow",
+                "forced_compaction": True,
+                "attempt": 1,
+                "max_attempts": 1,
+            },
+        )
+        forced_messages = self._prepare_context(forced=True)
+        self._check_context_preparation_allowed()
+        return self.model_client.complete(
+            forced_messages,
+            schemas,
+            self.model_parameters,
         )
 
     def _result(
@@ -644,13 +835,18 @@ class AgentLoop:
 
     def _failed_result(self, error: BaseException) -> AgentLoopResult:
         payload = self._safe_error_payload(error)
+        failure_reason = (
+            "context_overflow_after_forced_compaction"
+            if isinstance(error, ModelClientError) and error.context_overflow
+            else "unhandled_system_exception"
+        )
         self._emit_best_effort(EventType.ERROR, payload)
         if self._turn_active:
             self._emit_best_effort(
                 EventType.TURN_END,
                 {
                     "state": RuntimeState.FAILED.value,
-                    "reason": "unhandled_system_exception",
+                    "reason": failure_reason,
                     "assistant_text": self._last_assistant_text,
                     "budget": self.runtime.budget.snapshot(),
                 },
@@ -658,7 +854,7 @@ class AgentLoop:
         self._turn_active = False
         result = self._result(
             RuntimeState.FAILED,
-            reason="unhandled_system_exception",
+            reason=failure_reason,
             error_type=type(error).__name__,
         )
         self._finish_session(RuntimeState.FAILED, result.reason or "failed")
@@ -683,7 +879,7 @@ class AgentLoop:
     def _recover_empty_response(self, response: NormalizedAssistantResponse) -> None:
         budget = self.runtime.budget
         budget.record_protocol_error()
-        self._emit(
+        event = self._emit(
             EventType.ERROR,
             {
                 "state": RuntimeState.RUNNING.value,
@@ -700,7 +896,8 @@ class AgentLoop:
                     "Protocol error: return non-empty assistant text or one or more "
                     "native tool calls. Please correct the response."
                 ),
-            }
+            },
+            sequence=event.sequence,
         )
 
     def run_turn(self, user_message: str) -> AgentLoopResult:
@@ -720,8 +917,11 @@ class AgentLoop:
         try:
             self._check_active_view()
             self._start_session()
-            self._append_message({"role": "user", "content": user_message})
-            self._emit(EventType.USER_MESSAGE, {"text": user_message})
+            user_event = self._emit(EventType.USER_MESSAGE, {"text": user_message})
+            self._append_message(
+                {"role": "user", "content": user_message},
+                sequence=user_event.sequence,
+            )
 
             while True:
                 self._check_interrupt()
@@ -731,20 +931,19 @@ class AgentLoop:
                     return self._limit_result(limit)
 
                 self.runtime.budget.record_model_step()
-                response = self.model_client.complete(
-                    self.context_builder.build(self.runtime),
-                    self.registry.active_schemas(),
-                    self.model_parameters,
-                )
+                response = self._complete_model_request()
                 if not isinstance(response, NormalizedAssistantResponse):
                     raise TypeError("model_client.complete must return NormalizedAssistantResponse")
                 self._record_usage(response)
                 plans = self._plan_calls(response.tool_calls)
                 assistant_message = self._assistant_message(response, plans)
-                self._append_message(assistant_message)
-                self._emit(
+                assistant_event = self._emit(
                     EventType.ASSISTANT_MESSAGE,
                     self._assistant_payload(response, plans),
+                )
+                self._append_message(
+                    assistant_message,
+                    sequence=assistant_event.sequence,
                 )
                 pending_plans = list(plans)
                 if response.text:
@@ -809,7 +1008,10 @@ class AgentLoop:
 
                     self.runtime.budget.record_tool_call()
                     result = self._execute_plan(plan)
-                    self._append_message(self._tool_message(result, plan.context_tool_call_id))
+                    self._append_message(
+                        self._tool_message(result, plan.context_tool_call_id),
+                        sequence=self._tool_event_publisher.last_sequence,
+                    )
                     pending_plans.pop(0)
                     if result.status is ToolResultStatus.INVALID:
                         self.runtime.budget.record_protocol_error()
@@ -837,6 +1039,10 @@ class AgentLoop:
                         )
                         return self._limit_result(LimitReason.PROTOCOL_ERRORS)
 
+        except _LoopLimitReached as error:
+            return self._limit_result(error.reason)
+        except ContextWindowExceeded:
+            return self._limit_result(LimitReason.CONTEXT_WINDOW)
         except (KeyboardInterrupt, asyncio.CancelledError, CancellationRequested) as exc:
             try:
                 self._consume_published_result(pending_plans)

@@ -80,3 +80,9 @@
 - 选择：assistant 事件一旦持久化，其全部 tool calls 都必须按声明顺序得到同 correlation 的 `tool_call`、`policy_decision` 和唯一 `tool_result`。若 tool-call/protocol/wall 限额、取消、active-view 漂移或系统失败使剩余调用不能执行，Loop 通过 `ToolExecutor.skip()` 发布 `executed=false`、带具体原因的非成功结果，不进入 Registry dispatch、Policy 执行或 Environment 副作用。
 - Store-first 语义：`ToolExecutor` 新增默认关闭的 strict event publishing；T05 原有调用方继续把 observer 失败记录到 `event_errors` 而不改变执行。T08 使用适配器只在主 Store 没有产生 canonical event 时触发 strict 失败，因此 tool_call 持久化失败会在工具副作用前令 Loop `FAILED`，Store 已成功而 renderer 失败则继续。
 - 理由与后果：删除 assistant call 或只停止循环会使 JSONL 无法还原调用结果，继续执行又会越过预算/取消；显式未执行结果同时保持事实完整和无副作用终止。未来恢复和 compaction 可以依赖 assistant tool-call group 已闭合；若 Store 本身不可写，只能 fail-closed 并尽力写结束事件，不能伪造已持久化事实。
+
+## 2026-08-29 — T09 上下文估算、工具分组与失败退化边界
+
+- 选择：Context Builder 用 UTF-8 字节数除以 3、`1.12` 安全倍率和每项 framing overhead 做与 provider tokenizer 无关的保守估算；将显式 system prompt、active tool schemas、summary、当前 Runtime 消息/工具结果与预留输出统一计入窗口，默认在总窗口 `85%` 预触发。assistant tool calls 与全部匹配 tool results 作为不可拆分组，并使用 Store 分配的 sequence 作为压缩覆盖边界。
+- 压缩边界：Compactor 的每次请求继续完整携带同一显式 system prompt，tools 恒为空，且只总结能在自身窗口中完整容纳的旧 summary + 组前缀。成功事件持久化 summary 和 covered sequence；主 Store 失败则回滚 Runtime 投影指针并终止。
+- 失败与后果：普通 compaction 失败不内部重试，只按完整组省略旧前缀、注入明确退化提示并追加失败事件；仍超窗则 `LIMIT_REACHED(context_window)`。provider 报 context overflow 时，Loop 只做一次强制压缩后重试，再次 overflow 明确 `FAILED`。该选择不引入 tokenizer 包、Skill/MCP 发现或任何可执行 compaction Tool；T10 只需组装窗口/预留配置，T11 恢复最新 summary、covered/degraded sequence 投影状态。

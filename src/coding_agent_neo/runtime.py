@@ -102,6 +102,7 @@ class LimitReason(StrEnum):
     TOOL_CALLS = "tool_calls"
     PROTOCOL_ERRORS = "protocol_errors"
     WALL_TIME = "wall_time"
+    CONTEXT_WINDOW = "context_window"
 
 
 @dataclass(slots=True)
@@ -240,6 +241,9 @@ class ContextState:
     latest_summary: str | None = None
     covered_through_sequence: int = 0
     recent_messages: MutableSequence[Mapping[str, Any]] = field(default_factory=list)
+    recent_message_sequences: MutableSequence[int | None] = field(default_factory=list)
+    degraded_through_sequence: int = 0
+    degraded_notice: str | None = None
 
     def __post_init__(self) -> None:
         if self.latest_summary is not None and not isinstance(self.latest_summary, str):
@@ -247,11 +251,26 @@ class ContextState:
         _validate_nonnegative(
             self.covered_through_sequence, "covered_through_sequence", integer=True
         )
+        _validate_nonnegative(
+            self.degraded_through_sequence, "degraded_through_sequence", integer=True
+        )
+        if self.degraded_notice is not None and not isinstance(self.degraded_notice, str):
+            raise TypeError("degraded_notice must be a string or None")
         if not isinstance(self.recent_messages, Sequence):
             raise TypeError("recent_messages must be a sequence")
+        if not isinstance(self.recent_message_sequences, Sequence):
+            raise TypeError("recent_message_sequences must be a sequence")
         # Copy even explicitly supplied lists so a runtime cannot accidentally
         # mutate a caller's list while building a model projection.
         self.recent_messages = list(self.recent_messages)
+        self.recent_message_sequences = list(self.recent_message_sequences)
+        if len(self.recent_message_sequences) > len(self.recent_messages):
+            raise ValueError("recent_message_sequences cannot outnumber messages")
+        for sequence in self.recent_message_sequences:
+            _validate_nonnegative(sequence, "message sequence", integer=True)
+        self.recent_message_sequences.extend(
+            [None] * (len(self.recent_messages) - len(self.recent_message_sequences))
+        )
 
     @property
     def summary(self) -> str | None:
@@ -275,6 +294,18 @@ class ContextState:
     @property
     def recent_projection(self) -> MutableSequence[Mapping[str, Any]]:
         return self.recent_messages
+
+    def append_message(self, message: Mapping[str, Any], *, sequence: int | None) -> None:
+        """Append one projected message with its canonical event sequence."""
+
+        if not isinstance(message, Mapping):
+            raise TypeError("message must be a mapping")
+        _validate_nonnegative(sequence, "message sequence", integer=True)
+        self.recent_message_sequences.extend(
+            [None] * (len(self.recent_messages) - len(self.recent_message_sequences))
+        )
+        self.recent_messages.append(message)
+        self.recent_message_sequences.append(sequence)
 
 
 class ExecutionPolicy(Protocol):

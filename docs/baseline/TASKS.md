@@ -170,7 +170,7 @@ flowchart TD
 
 **完成摘要（2026-08-29）:** 已交付显式注入 `ModelClient`/`ToolRegistry`/`EventEmitter`/`AgentRuntime` 的同步串行 Agent Loop、简单未压缩上下文投影、交互 follow-up 生命周期、预算/连续协议错误/墙钟上限、中断与异常结束、Runtime 隔离及 active-tool 双事实源前置拒绝；内置工具与显式注入的非内置 fake Tool 共用同一协议路径。主 Agent 首轮验收退回了批次终止时未配对 tool call 与 Store-first 失败被吞掉的缺口；修正后，所有已持久化声明调用都有唯一关联结果，未执行调用以 `executed=false` 无副作用闭合，工具生命周期主 Store 写失败则 fail-closed，仅 renderer 失败不否定已持久化事实。Python 3.12.11 `.venv` 中主 Agent 独立复验 T08 定向 `20 passed`、T05/T06 回归 `45 passed`、全量 `134 passed`，Ruff lint/format-check、`python -m build`、workflow validator、配对/Store 失败对抗脚本、静态边界扫描与 `git diff --check` 均通过；证据仅基于 scripted fake model/environment，未执行真实网关、CLI、compaction、resume 或跨平台验证。
 
-### [ ] T09 — 交付按 Runtime 隔离的上下文预算与增量压缩
+### [x] T09 — 交付按 Runtime 隔离的上下文预算与增量压缩
 
 **依赖:** T08  
 **范围:** 接收组装层显式提供的 system prompt，实现 token 近似估算、Context Builder、完整工具交互分组、阈值触发 Compactor、一次强制压缩重试和有界失败退化；与 Loop 集成。排除跨 Agent 历史拼接、可执行 compaction tools、Skill 目录发现/解析/加载与 MCP 上下文。
@@ -185,6 +185,8 @@ flowchart TD
 - compaction 前后的每次请求都完整保留同一显式 system prompt；测试可注入任意只读文本，但不实现或声称 Skill 支持。
 
 **验证:** `python -m pytest tests/unit/test_context_builder.py tests/unit/test_compactor.py tests/integration/test_loop_compaction.py`; `python -m ruff check src/coding_agent_neo/context.py src/coding_agent_neo/compactor.py tests`。
+
+**完成摘要（2026-08-29）:** 已交付显式 system prompt 驱动、按 Runtime 隔离的 Context Builder 与增量 Compactor，使用保守 token 估算统一计入 prompt、active tool schemas、summary、有效消息/工具结果和输出预留；压缩只处理完整交互组，以无 tools 模型请求生成包含任务、约束、决策、文件、测试和未决项的增量 summary，并把 covered sequence 追加为 compaction 事件而不改写原 JSONL。普通压缩失败只执行一次完整组退化并注入提示，仍超窗返回 `LIMIT_REACHED(context_window)`；provider context overflow 最多触发一次强制压缩重试，主 Store 写入失败回滚 Runtime 投影并 fail-closed。Python 3.12.11 `.venv` 中主 Agent 独立复验 T09 定向 `17 passed`、T08 回归 `20 passed`、全量 `151 passed`，Ruff lint/format-check、`python -m build`、CLI help、workflow validator 与 `git diff --check` 均通过；未执行真实网关调用，`tests/acceptance` 尚由 T12 建立，当前 0 项并返回 pytest 5，不作为本卡通过证据。
 
 ## 阶段 D：用户入口与恢复
 
