@@ -138,6 +138,47 @@ def _envelope_from_record(record: Mapping[str, Any]) -> EventEnvelope:
     )
 
 
+def resolve_resume_path(
+    resume: str | os.PathLike[str],
+    session_dir: str | os.PathLike[str],
+) -> Path:
+    """Resolve ``--resume`` to a session JSONL path.
+
+    A value with a directory component, an absolute path, or a ``.jsonl``
+    suffix is treated as an explicit file path.  Otherwise it is a session ID
+    and maps to ``{session_dir}/{id}.jsonl``.
+    """
+
+    token = os.fspath(resume)
+    if not isinstance(token, str) or not token.strip() or "\x00" in token:
+        raise ValueError("resume target must be a non-empty path or session ID")
+    token = token.strip()
+    candidate = Path(token).expanduser()
+    if candidate.is_absolute() or len(candidate.parts) > 1 or candidate.suffix == ".jsonl":
+        return candidate
+    return Path(session_dir) / f"{token}.jsonl"
+
+
+def discard_incomplete_tail(path: str | os.PathLike[str]) -> SessionDiagnostic | None:
+    """Drop never-complete trailing bytes so a recovered store can append.
+
+    Complete JSONL records are left untouched.  Only an ``incomplete_tail``
+    reported by :func:`read_session` is truncated, at the diagnostic offset.
+    """
+
+    session_path = Path(path)
+    result = read_session(session_path)
+    diagnostic = result.tail_diagnostic
+    if diagnostic is None:
+        return None
+    try:
+        with session_path.open("r+b") as handle:
+            handle.truncate(diagnostic.byte_offset)
+    except OSError as error:
+        raise SessionError("session file could not be prepared for resume") from error
+    return diagnostic
+
+
 def read_session(
     path: str | os.PathLike[str],
     *,
@@ -468,5 +509,7 @@ __all__ = [
     "SessionReadResult",
     "SessionStore",
     "SessionWriteError",
+    "discard_incomplete_tail",
     "read_session",
+    "resolve_resume_path",
 ]

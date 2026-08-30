@@ -381,6 +381,8 @@ class LocalAgentBackend:
         approval_channel: ApprovalChannel,
         worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
         event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
+        resume_diagnostics: tuple[Any, ...] = (),
+        resume_last_sequence: int = 0,
     ) -> None:
         if (
             isinstance(worker_shutdown_timeout_seconds, bool)
@@ -400,6 +402,14 @@ class LocalAgentBackend:
         self._approval = approval_channel
         self._worker_shutdown_timeout = float(worker_shutdown_timeout_seconds)
         self._event_poll_timeout = float(event_poll_timeout_seconds)
+        self.resume_diagnostics = tuple(resume_diagnostics)
+        if (
+            isinstance(resume_last_sequence, bool)
+            or not isinstance(resume_last_sequence, int)
+            or resume_last_sequence < 0
+        ):
+            raise ValueError("resume_last_sequence must be a non-negative integer")
+        self.resume_last_sequence = resume_last_sequence
         self._queue: queue.Queue[AgentCommand] = queue.Queue()
         self._lock = threading.Lock()
         self._turn_in_progress = False

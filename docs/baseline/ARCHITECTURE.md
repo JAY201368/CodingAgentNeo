@@ -198,6 +198,7 @@ CLI 是 `AgentBackend` 之上的一个前端实现，本节的用户可见契约
 - 公共选项至少包括：`--model`、`--api-base`、`--api-key-env`、`--workspace`、`--session-dir`、`--resume`、`--approval-mode ask|auto|deny`、`--max-steps`、`--max-tool-calls`、`--max-wall-seconds`、`--command-timeout`、`--context-window`、`--reserved-output-tokens`、`--model-output-limit`、`--session-output-limit`。
 - `--yolo` 可以作为 `--approval-mode auto` 的明确别名；非交互模式若为 `ask`，需要确认的调用必须拒绝而非等待输入。
 - 正常 turn 完成返回 0；配置/认证/未恢复系统错误、`FAILED` 返回非零；`INTERRUPTED` 与 `LIMIT_REACHED` 使用文档化的非零退出码，由 T10 固化并测试。退出码由 `AgentBackend.last_state` 推导，不再依赖直接调用 Loop 得到的返回值。
+- 至少完成一次 turn 后，进程退出前在诊断流写出一行 resume 提示：`To continue this session, run: coding-agent-neo --resume <session_id>`。非交互模式写 stderr（stdout 仍仅含最终 assistant 文本）；交互模式写 stdout。未提交任务不提示。`--session-dir` 不是默认相对路径时，提示中带上该选项，保证复制即可继续。
 
 配置覆盖顺序为 CLI、`CODING_AGENT_NEO_*` 环境变量、未入库本地 TOML、内置默认值。API Key 的值只通过 `--api-key-env` 指定的环境变量读取；禁止提供会把 key 写入 argv 或已跟踪文件的 `--api-key` 选项。精确默认值由 T01/T10 在不改变上述契约的前提下固定。
 

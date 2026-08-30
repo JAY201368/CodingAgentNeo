@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Any, TextIO
 
 from coding_agent_neo import __version__
-from coding_agent_neo.assembly import build_local_backend
+from coding_agent_neo.assembly import SessionResumeError, build_local_backend
 from coding_agent_neo.backend import (
     AgentBackend,
     ApprovalResponse,
@@ -27,12 +30,14 @@ from coding_agent_neo.backend import (
 from coding_agent_neo.config import AppConfig, ConfigError, load_config
 from coding_agent_neo.models import EventType, RuntimeState
 from coding_agent_neo.renderer import TerminalRenderer
+from coding_agent_neo.session import SessionError, SessionFormatError
 
 EXIT_SUCCESS = 0
 EXIT_FAILED = 1
 EXIT_CONFIG = 2
 EXIT_LIMIT_REACHED = 3
 EXIT_INTERRUPTED = 130
+_DEFAULT_SESSION_DIR = Path(".coding-agent-neo/sessions")
 
 _CONFIG_OPTIONS = (
     "model",
@@ -81,7 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         metavar="SESSION",
-        help="Reserved for T11 session recovery; not supported by this release.",
+        help="Resume a linear session by ID or JSONL path.",
     )
     parser.add_argument("--approval-mode", choices=("ask", "auto", "deny"))
     parser.add_argument("--yolo", action="store_true", help="Alias for --approval-mode auto.")
@@ -119,6 +124,50 @@ def exit_code_for(result: RuntimeState | Any) -> int:
     }.get(state, EXIT_FAILED)
 
 
+def format_resume_hint(
+    session_id: str,
+    *,
+    session_dir: str | os.PathLike[str] | None = None,
+) -> str:
+    """Return the copy-paste command that continues a linear session."""
+
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError("session_id must be a non-empty string")
+    parts = ["coding-agent-neo", "--resume", session_id.strip()]
+    if session_dir is not None and _session_dir_needs_flag(Path(session_dir)):
+        parts.extend(["--session-dir", os.fspath(session_dir)])
+    return "To continue this session, run: " + " ".join(shlex.quote(part) for part in parts)
+
+
+def _session_dir_needs_flag(session_dir: Path) -> bool:
+    if session_dir == _DEFAULT_SESSION_DIR:
+        return False
+    try:
+        return session_dir.resolve() != _DEFAULT_SESSION_DIR.resolve()
+    except OSError:
+        return True
+
+
+def _event_session_id(event: Any) -> str | None:
+    value = getattr(event, "session_id", None)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _write_resume_hint(
+    stream: TextIO,
+    session_id: str | None,
+    *,
+    session_dir: Path,
+) -> None:
+    if not session_id:
+        return
+    stream.write(f"{format_resume_hint(session_id, session_dir=session_dir)}\n")
+    stream.flush()
+
+
 def _interactive_task(input_stream: TextIO, output: TextIO, prompt: str) -> str | None:
     output.write(prompt)
     output.flush()
@@ -154,10 +203,13 @@ def _consume_turn(
     interactive: bool,
     input_stream: TextIO,
     event_stream: TextIO,
-) -> tuple[int, str]:
+) -> tuple[int, str, str | None]:
     assistant_text = ""
+    session_id = None
     for event in backend.events(since=cursor):
         cursor = event.sequence
+        if session_id is None:
+            session_id = _event_session_id(event)
         renderer.render(event)
         name = _event_name(event)
         payload = event.payload if isinstance(event.payload, Mapping) else {}
@@ -173,8 +225,8 @@ def _consume_turn(
             text = payload.get("assistant_text")
             if text:
                 assistant_text = str(text)
-            return cursor, assistant_text
-    return cursor, assistant_text
+            return cursor, assistant_text, session_id
+    return cursor, assistant_text, session_id
 
 
 def _drain_events(
@@ -182,10 +234,13 @@ def _drain_events(
     renderer: TerminalRenderer,
     *,
     cursor: int,
-) -> int:
+) -> tuple[int, str | None]:
+    session_id = None
     try:
         for event in backend.events(since=cursor):
             cursor = event.sequence
+            if session_id is None:
+                session_id = _event_session_id(event)
             renderer.render(event)
             if _event_name(event) in {
                 EventType.SESSION_END.value,
@@ -203,8 +258,8 @@ def _drain_events(
                 ):
                     break
     except (KeyboardInterrupt, BackendClosedError):
-        return cursor
-    return cursor
+        return cursor, session_id
+    return cursor, session_id
 
 
 def run_cli(
@@ -216,24 +271,33 @@ def run_cli(
     output_stream: TextIO,
     error_stream: TextIO,
     backend_factory: Callable[..., AgentBackend] | None = None,
+    resume: str | None = None,
 ) -> int:
     """Run after configuration and task-source validation have completed."""
 
     event_stream = output_stream if interactive else error_stream
     factory = build_local_backend if backend_factory is None else backend_factory
-    backend = factory(config, interactive=interactive)
+    backend = factory(config, interactive=interactive, resume=resume)
     renderer = TerminalRenderer(event_stream, output_limit=min(config.model_output_limit, 8_000))
-    cursor = 0
+    cursor = int(getattr(backend, "resume_last_sequence", 0) or 0)
+    for diagnostic in getattr(backend, "resume_diagnostics", ()):
+        line_number = getattr(diagnostic, "line_number", None)
+        message = getattr(diagnostic, "message", "ignored an incomplete final JSONL record")
+        location = f" (line {line_number})" if line_number is not None else ""
+        error_stream.write(f"session diagnostic: {message}{location}\n")
+        error_stream.flush()
     ran_turn = False
     assistant_text = ""
+    session_id: str | None = None
     try:
         current = task
         if interactive and current is None:
-            current = _interactive_task(input_stream, output_stream, "task> ")
+            prompt = "follow-up> " if resume is not None else "task> "
+            current = _interactive_task(input_stream, output_stream, prompt)
         while current is not None:
             backend.send(SubmitTask(current))
             ran_turn = True
-            cursor, assistant_text = _consume_turn(
+            cursor, assistant_text, seen = _consume_turn(
                 backend,
                 renderer,
                 cursor=cursor,
@@ -241,6 +305,8 @@ def run_cli(
                 input_stream=input_stream,
                 event_stream=event_stream,
             )
+            if session_id is None:
+                session_id = seen
             if not interactive or backend.last_state is not RuntimeState.COMPLETED_TURN:
                 break
             current = _interactive_task(input_stream, output_stream, "follow-up> ")
@@ -249,6 +315,7 @@ def run_cli(
         if not interactive and assistant_text:
             output_stream.write(f"{assistant_text}\n")
             output_stream.flush()
+        _write_resume_hint(event_stream, session_id, session_dir=config.session_dir)
         return exit_code_for(backend.last_state)
     except KeyboardInterrupt:
         try:
@@ -259,7 +326,11 @@ def run_cli(
             backend.send(CloseSession("keyboard_interrupt"))
         except BackendClosedError:
             pass
-        _drain_events(backend, renderer, cursor=cursor)
+        _, seen = _drain_events(backend, renderer, cursor=cursor)
+        if session_id is None:
+            session_id = seen
+        if ran_turn:
+            _write_resume_hint(event_stream, session_id, session_dir=config.session_dir)
         return EXIT_INTERRUPTED
     finally:
         try:
@@ -274,8 +345,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.resume is not None:
-        parser.error("--resume is reserved for T11 and is not implemented")
     try:
         config = load_config(_cli_config_values(args), config_path=args.config)
     except ConfigError as error:
@@ -302,7 +371,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             input_stream=sys.stdin,
             output_stream=sys.stdout,
             error_stream=sys.stderr,
+            resume=args.resume,
         )
+    except ConfigError as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return EXIT_CONFIG
+    except (SessionResumeError, SessionFormatError, SessionError) as error:
+        print(f"startup failure: {type(error).__name__}", file=sys.stderr)
+        return EXIT_FAILED
     except Exception as error:
         print(f"startup failure: {type(error).__name__}", file=sys.stderr)
         return EXIT_FAILED
@@ -316,6 +392,7 @@ __all__ = [
     "EXIT_SUCCESS",
     "build_parser",
     "exit_code_for",
+    "format_resume_hint",
     "main",
     "run_cli",
 ]

@@ -13,6 +13,7 @@ from coding_agent_neo.cli import (
     EXIT_LIMIT_REACHED,
     build_parser,
     exit_code_for,
+    format_resume_hint,
     run_cli,
 )
 from coding_agent_neo.config import AppConfig
@@ -104,6 +105,11 @@ def test_noninteractive_success_stdout_contract_and_parseable_session(tmp_path: 
     assert "assistant> done" in stderr.getvalue()
     paths = list((tmp_path / "sessions").glob("*.jsonl"))
     assert len(paths) == 1
+    session_id = paths[0].stem
+    hint = stderr.getvalue()
+    assert "To continue this session, run:" in hint
+    assert f"--resume {session_id}" in hint
+    assert "--session-dir" in hint
     events = read_session(paths[0]).events
     assert events[-1].type == EventType.SESSION_END
 
@@ -127,6 +133,9 @@ def test_interactive_initial_and_followup(tmp_path: Path) -> None:
     assert "follow-up> " in output.getvalue()
     assert "assistant> first" in output.getvalue()
     assert "assistant> second" in output.getvalue()
+    session_id = next((tmp_path / "sessions").glob("*.jsonl")).stem
+    assert "To continue this session, run:" in output.getvalue()
+    assert f"--resume {session_id}" in output.getvalue()
 
 
 def test_failed_and_limit_exit_codes(tmp_path: Path) -> None:
@@ -158,6 +167,36 @@ def test_exit_code_interrupted_contract() -> None:
         state = RuntimeState.INTERRUPTED
 
     assert exit_code_for(Result()) == EXIT_INTERRUPTED
+
+
+def test_format_resume_hint_omits_default_session_dir() -> None:
+    hint = format_resume_hint("session_abc")
+    assert hint == "To continue this session, run: coding-agent-neo --resume session_abc"
+    default = format_resume_hint("session_abc", session_dir=Path(".coding-agent-neo/sessions"))
+    assert default == hint
+
+
+def test_format_resume_hint_includes_custom_session_dir(tmp_path: Path) -> None:
+    session_dir = tmp_path / "custom sessions"
+    hint = format_resume_hint("session_abc", session_dir=session_dir)
+    assert hint.startswith("To continue this session, run: coding-agent-neo --resume session_abc")
+    assert "--session-dir" in hint
+    assert "custom sessions" in hint
+
+
+def test_interactive_empty_input_does_not_print_resume_hint(tmp_path: Path) -> None:
+    output = StringIO()
+    code = run_cli(
+        config(tmp_path),
+        task=None,
+        interactive=True,
+        input_stream=StringIO(""),
+        output_stream=output,
+        error_stream=StringIO(),
+        backend_factory=factory_for(ScriptedModel([])),
+    )
+    assert code == 0
+    assert "To continue this session" not in output.getvalue()
 
 
 def bash_call(command: str) -> NormalizedAssistantResponse:
@@ -227,18 +266,21 @@ def test_interactive_bash_confirmation(tmp_path: Path) -> None:
 
 
 def test_keyboard_interrupt_is_documented_and_persisted(tmp_path: Path) -> None:
+    stderr = StringIO()
     code = run_cli(
         config(tmp_path),
         task="interrupt",
         interactive=False,
         input_stream=StringIO(),
         output_stream=StringIO(),
-        error_stream=StringIO(),
+        error_stream=stderr,
         backend_factory=factory_for(ScriptedModel([KeyboardInterrupt()])),
     )
     assert code == EXIT_INTERRUPTED
     path = next((tmp_path / "sessions").glob("*.jsonl"))
     assert read_session(path).events[-1].payload["state"] == RuntimeState.INTERRUPTED
+    assert "To continue this session, run:" in stderr.getvalue()
+    assert f"--resume {path.stem}" in stderr.getvalue()
 
 
 def test_subprocess_help_and_redacted_config_failure(tmp_path: Path) -> None:

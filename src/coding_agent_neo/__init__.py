@@ -8,7 +8,12 @@ from coding_agent_neo.agent_loop import (
     SimpleContextBuilder,
     TurnResult,
 )
-from coding_agent_neo.assembly import build_local_backend, build_system_prompt
+from coding_agent_neo.assembly import (
+    SessionResumeError,
+    build_local_backend,
+    build_system_prompt,
+    recover_session_plan,
+)
 from coding_agent_neo.backend import (
     AgentBackend,
     ApprovalResponse,
@@ -230,6 +235,7 @@ __all__ = [
     "SessionFormatError",
     "SessionId",
     "SessionReadResult",
+    "SessionResumeError",
     "SessionStore",
     "SessionWriteError",
     "SimpleContextBuilder",
@@ -254,5 +260,6 @@ __all__ = [
     "group_messages",
     "load_config",
     "read_session",
+    "recover_session_plan",
     "safe_json_value",
 ]

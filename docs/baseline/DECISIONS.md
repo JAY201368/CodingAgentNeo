@@ -91,7 +91,7 @@
 
 - 选择：默认本地配置文件为已忽略的 `.coding-agent-neo.toml`，可用 `--config` 或 `CODING_AGENT_NEO_CONFIG` 选择其他路径；非交互最终 assistant 文本单独写 stdout，事件/诊断写 stderr。进程退出码固定为完成 `0`、`FAILED`/启动失败 `1`、用法/配置失败 `2`、`LIMIT_REACHED` `3`、`INTERRUPTED` `130`。
 - 理由与替代：单独 stdout 让 shell 脚本可直接消费最终结果，同时 stderr 保留可观察轨迹；`130` 遵循 SIGINT 的常见 shell 约定，独立的 limit 码可避免与系统失败混淆。本地 TOML 只保存 API key 环境变量名，不接受 key 值。
-- 后果：T11 的 `--resume` 业务必须保持这些 stdio/退出码与 secret 契约；完整 TUI、Skill/MCP 配置仍不在该配置面中。
+- 后果：T11 的 `--resume` 业务必须保持这些 stdio/退出码与 secret 契约；完整 TUI、Skill/MCP 配置仍不在该配置面中。会话结束时的 resume 提示属于诊断流，不得写入非交互 stdout。
 
 ## 2026-08-30 — ARCH 前端与 Agent 后端以命令/事件解耦
 
@@ -101,3 +101,17 @@
 - 事件流：不修改 `events.py`，改为新增一个只做“追加到缓冲并唤醒等待者”的订阅者。事件必须先由 Session Store 分配 sequence 并落盘才对前端可见，因此 UI 与审计轨迹不会分叉；sequence 同时就是游标，断线续订只需记住最后一个值。拉取模型天然隔离慢消费者，不需要额外的 lag 语义或环形缓冲。
 - 理由与替代：把 `run_turn` 改成生成器由前端驱动可以零线程且完全确定，但 approval 发生在 executor 深处，需要把整条调用栈改成 `yield from`，改动面和风险都远大于线程方案。只抽出组装层而保留阻塞回调则不构成真解耦，进程外前端仍然无法接入。
 - 边界与后果：Web GUI、HTTP/跨进程传输、运行中 steering 和后台输入队列仍是明确排除项——turn 执行期间提交新任务是错误而不是排队，以保持 FR-05 的范围。Ctrl+C 语义从"异常直接从 Loop 栈内抛出"变为"前端捕获后转 `Interrupt` 命令"；因为 `CancellationSignal` 是 `threading.Event` 且 `LocalExecutionEnvironment` 在等待子进程时轮询它，运行中的命令仍会被真正打断。T11 的 resume 在 `assembly.py` 完成，T12 的静态审查需增加"前端不持有 Agent 对象、后端不依赖终端 I/O"一项。本决策不触及需求正文第 22 节的任何变更条件，因此不构成需求基线变更。
+
+## 2026-08-30 — T11 线性恢复使用新墙钟并截断未完成尾行
+
+- 选择：`--resume` 在 `assembly.py` 解析并重建 root Runtime。预算计数（model_steps / tool_calls / protocol_errors / tokens）从历史事件或最后一次 `turn_end`/`agent_end`/`session_end` snapshot 恢复；`started_at` 与 `deadline` 用当前进程单调时钟重新计算，不沿用上一进程的 monotonic 值。`CancellationSignal` 始终以未取消初值恢复，即使上一会话以 `INTERRUPTED` 结束。
+- 不完整尾行：`read_session` 报告 `incomplete_tail` 后，恢复路径调用 `discard_incomplete_tail`，只截断从未形成完整 JSONL 记录的尾部字节，再打开同一 `SessionStore` 从 `last_valid_sequence + 1` 继续。T06 默认行为不变：未截断时 Store 仍拒绝 append。完整历史行不被改写。
+- Loop 胶水：不把 Loop 改成生成器。ContextState 在组装时已就位；首次 follow-up 仍走既有 `_start_session()`，因此会 `environment.start()` 并再追加一组 `session_start`/`agent_start`，sequence 接续。这是新进程启动，不是重放历史工具。
+- 事件流：不把历史事件预载进 Event Stream。CLI 从 `resume_last_sequence` 消费新事件，默认不把整段历史当新输出渲染。不完整尾行诊断写 stderr。
+- 路径选择：绝对路径、含目录成分或以 `.jsonl` 结尾的值视为明确文件；否则在 `session_dir` 下找 `{id}.jsonl`。找不到或不可读为配置失败（退出码 2）；schema/空文件/缺 root agent 为启动失败（退出码 1）。
+
+## 2026-08-31 — 会话结束时在诊断流提示 resume 命令
+
+- 选择：至少完成一次 turn 后，CLI 在退出前写出 `To continue this session, run: coding-agent-neo --resume <session_id>`。非交互写 stderr，交互写 stdout；未提交任务不提示。`--session-dir` 不是默认 `.coding-agent-neo/sessions` 时附带该选项。session ID 从前端已消费的事件信封读取，不扩大 `AgentBackend` 契约。
+- 理由与替代：T10 把非交互 stdout 留给最终 assistant 文本，提示放进 stdout 会破坏脚本消费；把提示放进 renderer 会让展示层知道 CLI 语法。不附带全部原始 flags，避免把模型名或工作区噪声复制进下一命令；session 目录一旦不是默认值，不带 `--session-dir` 则复制后找不到文件。
+- 后果：T12 验收与演示可直接引用该提示；非交互 stdout 契约保持 `assistant_text + newline`。

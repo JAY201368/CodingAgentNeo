@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T10、T14 已接受
+> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T11、T14 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T14 已接受，下一个依赖就绪任务为 T11。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T11 已接受，下一个依赖就绪任务为 T12。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -228,7 +228,7 @@ flowchart TD
 
 **完成摘要（2026-08-30）:** 已交付 `AgentCommand`/`AgentBackend` 契约、`assembly.py` 的 `build_local_backend`、同进程 `LocalAgentBackend`（单 worker 线程、命令分发、Event Stream 游标缓冲、Channel Approval Port），以及只发命令、按 sequence 游标拉事件的 CLI 前端；`renderer.py` 不再订阅 EventEmitter。交互 `ask` 先持久化 `approval_request` 再等待 `ApprovalResponse`；超时/`Interrupt`/`close()`/`request_id` 不匹配 fail-closed 拒绝且无 Environment 副作用；非交互 `ask` 仍在 policy 层拒绝且不发请求。T10 的 CLI 选项、stdout/stderr 与退出码 `0/1/2/3/130` 保持不变，退出码由 `last_state` 推导。未改 `agent_loop.py`/`executor.py`/`policy.py`/`events.py` 行为，未实现 resume。主 Agent 独立复验定向测试 32 passed、T05/T06/T08/T09/T10 回归矩阵 107 passed、全量 `185 passed`，Ruff lint/format-check、`python -m build`、CLI help、workflow validator 与 `git diff --check` 均通过。
 
-### [ ] T11 — 交付线性 Session 恢复与 follow-up
+### [x] T11 — 交付线性 Session 恢复与 follow-up
 
 **依赖:** T06, T09, T14
 
@@ -242,6 +242,8 @@ flowchart TD
 - 恢复后的事件 sequence 接续且无重复，新的 compaction/turn/session 事件仍可解析。
 
 **验证:** `python -m pytest tests/unit/test_session_recovery.py tests/integration/test_resume_cli.py`; `python -m ruff check src/coding_agent_neo/session.py src/coding_agent_neo/assembly.py src/coding_agent_neo/cli.py tests`。
+
+**完成摘要（2026-08-30）:** 已交付线性 `--resume`：`assembly.py` 按 session ID 或 JSONL 路径加载、校验 schema/session/sequence、报告不完整尾行并只截断从未完成的尾部字节，重建相同 session/root agent ID、预算计数、active tools、未取消的 cancellation 与最新 compaction 投影；打开同一 Store 接续 sequence，以 `SubmitTask` 接受 follow-up，不重放历史写文件或命令。CLI 只传选项、把尾行诊断写 stderr，并从 `resume_last_sequence` 渲染新事件。找不到 session 为退出码 2，格式/空/缺 root 为退出码 1。墙钟用当前进程单调时钟重算。主 Agent 独立复验定向 18 passed、T06/T09/T10/T14 回归 77 passed、全量 `203 passed`，Ruff lint/format-check、`python -m build`、CLI help、workflow validator 与 `git diff --check` 均通过。
 
 ## 阶段 E：验收、说明与提交准备
 
