@@ -1,7 +1,7 @@
 # CodingAgentNeo 当前进度
 
 > 更新日期：2026-08-30
-> 当前阶段：Change control 已完成 — T10 已接受，新增 T14 前后端解耦任务卡，等待派发
+> 当前阶段：Execute — T14 已接受，下一个依赖就绪任务为 T11
 
 ## Completed
 
@@ -15,15 +15,16 @@
 - T08 — 已交付可独立实例化的同步串行 Agent Loop，完成通用 active Tool 驱动、简单未压缩上下文、交互 follow-up、事件生命周期、预算/协议/墙钟限制、中断/异常关闭、Runtime 隔离与 active-view fail-closed；批次中未执行的声明调用以完整无副作用结果闭合，工具生命周期主 Store 失败不得继续执行。主 Agent 独立复验定向 20 passed、T05/T06 回归 45 passed、全量 134 passed，Ruff lint/format、build、workflow validator、对抗脚本、静态扫描与 diff check 均通过。
 - T09 — 已交付显式 system prompt 的保守上下文预算、完整工具交互分组、按 Runtime 隔离的增量压缩、无 tools 总结请求、有界失败退化、covered sequence 事件和 provider overflow 最多一次强制压缩重试；主 Store 失败会回滚投影，原 JSONL 不改写。主 Agent 独立复验 T09 定向 17 passed、T08 回归 20 passed、全量 151 passed，并通过 Ruff lint/format、build、CLI help、workflow validator 与 diff check；未执行真实网关，T12 聚合 acceptance 目录尚未建立。
 - T10 — 已交付配置覆盖与副作用前校验、只按环境变量名解析 API key、显式 system prompt/依赖组装、交互/非交互 CLI、approval、Store-first Terminal Renderer、统计、默认 JSONL session 及文档化 stdio/退出码契约。主 Agent 独立复验定向 17 passed、全量 166 passed，并通过 Ruff lint/format、build、workflow validator、CLI help 与 diff check；未执行真实网关，resume、完整 TUI 和 Skill/MCP 具体接入仍排除。
+- T14 — 已交付前端与 Agent 后端的命令/事件解耦：CLI 只通过 `AgentBackend` 发送 `SubmitTask`/`ApprovalResponse`/`Interrupt`/`CloseSession` 并按 sequence 游标消费事件；组装迁到 `assembly.py`；`LocalAgentBackend` 在单一 worker 线程中运行既有同步 Loop。交互 bash 确认先落盘 `approval_request` 再等待前端答复；approval 超时/`Interrupt`/`close()`/`request_id` 不匹配 fail-closed；非交互 `ask` 不发请求。T10 退出码/stdio 契约保持不变。主 Agent 独立复验定向 32 passed、T05/T06/T08/T09/T10 回归 107 passed、全量 185 passed，Ruff lint/format、build、CLI help、workflow validator 与 `git diff --check` 均通过。
 
 ## Current State
 
 - 用户已批准 `docs/agent-system-requirements-baseline.md` v1.2 为权威需求正文：首版只保留显式 system prompt 和通用 Tool 两个窄扩展边界，不实现 Skill/MCP 具体功能。
 - 开发过程文档已统一迁移到 `docs/baseline/`，并于 2026-08-28 通过用户变更审阅；已完成 T01～T07 的范围和实现证据保持不变。
-- 仓库现有可运行的交互/非交互 CLI 组装、本地配置示例、事件渲染和默认 JSONL session；Agent Loop 已集成按 Runtime 隔离的自动上下文压缩。resume 业务仍未实现。
-- T01、T02、T03、T04、T05、T06、T07、T08、T09、T10 均已通过各自专用 worker 验证和主 Agent 独立复验。
-- 2026-08-30 用户发起前后端解耦变更并完成审阅：架构基线升到 0.3，新增 `AgentBackend`/`AgentCommand`/`approval_request` 公开契约与 `assembly.py`、`backend.py` 两个计划模块，`cli.py` 与 `renderer.py` 降级为前端侧组件。该变更不触及需求正文第 22 节的任何变更条件，因此需求基线保持 v1.2 不变。文档已更新，代码尚未开始。
-- 任务顺序据此调整为 T10 → T14 → T11 → T12 → T13，使 resume 直接建立在解耦后的组装入口上。
+- 仓库现有可运行的交互/非交互 CLI 前端：只通过 `AgentBackend` 发送命令并按 sequence 游标拉取事件；组装在 `assembly.py`，同进程 `LocalAgentBackend` 在单一 worker 线程中运行既有同步 Loop。resume 业务仍未实现。
+- T01、T02、T03、T04、T05、T06、T07、T08、T09、T10、T14 均已通过各自专用 worker 验证和主 Agent 独立复验。
+- 2026-08-30 用户发起前后端解耦变更并完成审阅：架构基线升到 0.3。T14 已按该契约落地；该变更不触及需求正文第 22 节，需求基线保持 v1.2。
+- 任务顺序仍为 T10 → T14 → T11 → T12 → T13。
 
 ## Known Issues
 
@@ -31,11 +32,11 @@
 - 尚无且首版不要求 Skill 目录发现/解析/加载或 MCP 客户端/配置/传输证据；后续 T08/T09 的 fake Tool 和显式 prompt 测试只验证核心边界，不代表这两项集成已完成。
 - `tests/acceptance` 聚合套件计划由 T12 建立；当前目录不存在，因此该标准命令收集 0 项并返回 pytest 5，不能作为现阶段通过证据。
 - T13 涉及公开仓库、视频与外部提交的人工/授权步骤，不能由自动化测试单独证明。
-- T14 会重写 T10 已验收的 `cli.py` 组装与 approval 路径，`tests/integration/test_cli.py` 与 `tests/unit/test_renderer.py` 需相应改写；线程相关测试必须注入超时参数，否则容易出现 flaky。T14 完成前，现有 CLI 仍是唯一可运行入口。
-- 距 T13 记录的 2026-09-02 24:00 提交时限只剩约三天，T14、T11、T12、T13 四张卡未完成；若时间不足，应优先保证 T12 的验收证据真实，而不是勾选未验证的任务。
+- T14 线程相关测试注入了 approval/shutdown/event-poll 超时；生产默认值为 approval 120s、worker 停机 30s、事件轮询 0.1s。未验证跨进程或网络前端。
+- 距 T13 记录的 2026-09-02 24:00 提交时限只剩约三天，T11、T12、T13 三张卡未完成；若时间不足，应优先保证 T12 的验收证据真实，而不是勾选未验证的任务。
 - 宿主 Homebrew Python 的直接安装命令受 PEP 668 限制；在 Python 3.12 `.venv` 中执行同一安装命令并完成全部 T01 质量门。
 
 ## Next Recommended Task
 
-- T14（交付前端与 Agent 后端的命令/事件解耦）的依赖 T10 已有完成证据，且用户已确认它先于 T11 执行，因此它是下一个应派发的任务；尚未派发专用子 Agent。
-- T11 的依赖已由 T06、T09、T10 改为 T06、T09、T14，在 T14 接受前不具备派发条件。
+- T11（交付线性 Session 恢复与 follow-up）的依赖 T06、T09、T14 均已勾选且有验证证据，因此它是下一个应派发的任务。
+- T12 在 T11 接受前不具备派发条件。

@@ -6,11 +6,11 @@ import sys
 from io import StringIO
 from pathlib import Path
 
+from coding_agent_neo.assembly import build_local_backend
 from coding_agent_neo.cli import (
     EXIT_FAILED,
     EXIT_INTERRUPTED,
     EXIT_LIMIT_REACHED,
-    assemble_session,
     build_parser,
     exit_code_for,
     run_cli,
@@ -73,8 +73,16 @@ def config(tmp_path: Path, **changes) -> AppConfig:
 
 
 def factory_for(model):
-    def factory(cfg, **kwargs):
-        return assemble_session(cfg, model_client=model, **kwargs)
+    def factory(cfg, *, interactive, **_kwargs):
+        return build_local_backend(
+            cfg,
+            interactive=interactive,
+            model_client=model,
+            approval_timeout_seconds=2.0,
+            worker_shutdown_timeout_seconds=5.0,
+            event_poll_timeout_seconds=0.05,
+            fsync=False,
+        )
 
     return factory
 
@@ -88,7 +96,7 @@ def test_noninteractive_success_stdout_contract_and_parseable_session(tmp_path: 
         input_stream=StringIO("must-not-be-read"),
         output_stream=stdout,
         error_stream=stderr,
-        session_factory=factory_for(ScriptedModel([NormalizedAssistantResponse(text="done")])),
+        backend_factory=factory_for(ScriptedModel([NormalizedAssistantResponse(text="done")])),
     )
 
     assert code == 0
@@ -112,7 +120,7 @@ def test_interactive_initial_and_followup(tmp_path: Path) -> None:
         input_stream=StringIO("initial\nfollow up\n"),
         output_stream=output,
         error_stream=StringIO(),
-        session_factory=factory_for(model),
+        backend_factory=factory_for(model),
     )
     assert code == 0
     assert "task> " in output.getvalue()
@@ -130,7 +138,7 @@ def test_failed_and_limit_exit_codes(tmp_path: Path) -> None:
         input_stream=StringIO(),
         output_stream=StringIO(),
         error_stream=StringIO(),
-        session_factory=factory_for(ScriptedModel([fatal])),
+        backend_factory=factory_for(ScriptedModel([fatal])),
     )
     assert code == EXIT_FAILED
     limited = run_cli(
@@ -140,7 +148,7 @@ def test_failed_and_limit_exit_codes(tmp_path: Path) -> None:
         input_stream=StringIO(),
         output_stream=StringIO(),
         error_stream=StringIO(),
-        session_factory=factory_for(ScriptedModel([NormalizedAssistantResponse()])),
+        backend_factory=factory_for(ScriptedModel([NormalizedAssistantResponse()])),
     )
     assert limited == EXIT_LIMIT_REACHED
 
@@ -174,7 +182,7 @@ def test_noninteractive_ask_denies_without_reading_and_auto_runs(tmp_path: Path)
         input_stream=StringIO("yes\n"),
         output_stream=StringIO(),
         error_stream=ask_stderr,
-        session_factory=factory_for(
+        backend_factory=factory_for(
             ScriptedModel([bash_call("printf blocked"), NormalizedAssistantResponse(text="denied")])
         ),
     )
@@ -190,7 +198,7 @@ def test_noninteractive_ask_denies_without_reading_and_auto_runs(tmp_path: Path)
         input_stream=StringIO(),
         output_stream=StringIO(),
         error_stream=auto_stderr,
-        session_factory=factory_for(
+        backend_factory=factory_for(
             ScriptedModel([bash_call("printf auto-ok"), NormalizedAssistantResponse(text="done")])
         ),
     )
@@ -208,7 +216,7 @@ def test_interactive_bash_confirmation(tmp_path: Path) -> None:
         input_stream=StringIO("yes\n"),
         output_stream=output,
         error_stream=StringIO(),
-        session_factory=factory_for(
+        backend_factory=factory_for(
             ScriptedModel([bash_call("printf approved"), NormalizedAssistantResponse(text="done")])
         ),
     )
@@ -226,7 +234,7 @@ def test_keyboard_interrupt_is_documented_and_persisted(tmp_path: Path) -> None:
         input_stream=StringIO(),
         output_stream=StringIO(),
         error_stream=StringIO(),
-        session_factory=factory_for(ScriptedModel([KeyboardInterrupt()])),
+        backend_factory=factory_for(ScriptedModel([KeyboardInterrupt()])),
     )
     assert code == EXIT_INTERRUPTED
     path = next((tmp_path / "sessions").glob("*.jsonl"))

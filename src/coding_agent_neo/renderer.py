@@ -1,4 +1,9 @@
-"""Bounded, fact-preserving terminal rendering for canonical events."""
+"""Bounded, fact-preserving terminal rendering for canonical events.
+
+The renderer is a frontend component: the CLI event loop pulls envelopes from
+``AgentBackend.events()`` and calls :meth:`TerminalRenderer.render`. It is not
+an EventEmitter subscriber and must not be imported by the backend.
+"""
 
 from __future__ import annotations
 
@@ -39,7 +44,7 @@ class RenderStats:
 
 
 class TerminalRenderer:
-    """An EventEmitter subscriber that never changes the canonical fact."""
+    """Render canonical events after the frontend has pulled them."""
 
     def __init__(self, stream: TextIO | None = None, *, output_limit: int = 2_000) -> None:
         if (
@@ -80,6 +85,15 @@ class TerminalRenderer:
         if name == EventType.TOOL_CALL.value:
             self.stats.tool_calls += 1
             self._write(f"tool-call> {payload.get('tool_name', '<unknown>')}")
+            return
+        if name == EventType.APPROVAL_REQUEST.value:
+            tool = payload.get("tool_name", "<unknown>")
+            summary = payload.get("arguments_summary", "")
+            timeout = payload.get("timeout_seconds")
+            extra = "" if timeout is None else f" timeout={timeout}s"
+            self._write(
+                f"approval-request> {tool} {_bounded(summary, min(400, self.output_limit))}{extra}"
+            )
             return
         if name == EventType.POLICY_DECISION.value:
             requested = payload.get("requested", "")

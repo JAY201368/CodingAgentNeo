@@ -34,7 +34,10 @@
 - `runtime.py` 拥有每 Agent 可变状态；禁止模块级 current agent/session/workspace/active tools/budget。
 - `session.py` 拥有 append-only 事实历史；`context.py`/`compactor.py` 只能接收显式 system prompt 并生成投影，不能删除或改写历史，也不得扫描 Skill 或外部资源。
 - `model_client.py` 隔离厂商协议；其他模块只接收归一化内部模型。
-- `cli.py` 只组装显式 system prompt/依赖并处理终端 I/O，不复制 Agent 决策、安全校验或持久化逻辑；首版不增加 Skill/MCP 配置。
+- `cli.py` 是前端：解析参数、加载配置、通过 `assembly.py` 取得 `AgentBackend`、发送命令、拉取事件并驱动 renderer，处理终端 I/O 与退出码；不持有 Loop/Runtime/Store/Environment/ModelClient/Registry，也不复制 Agent 决策、安全校验或持久化逻辑。首版不增加 Skill/MCP 配置。
+- `assembly.py` 拥有显式 system prompt 与全部后端依赖组装，返回 `AgentBackend`。
+- `backend.py` 拥有 `AgentCommand`/`AgentBackend` 契约、Event Stream 游标缓冲、worker 线程和 Channel Approval Port。
+- `backend.py`、`assembly.py` 及其下游不得 import `cli.py` 或 `renderer.py`，也不得直接读写 `sys.stdin`/`sys.stdout`/`sys.stderr`。
 
 ## 4. 代码与契约约定
 

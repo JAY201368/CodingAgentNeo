@@ -1,4 +1,10 @@
-"""Interactive and one-shot command-line assembly for CodingAgentNeo."""
+"""Interactive and one-shot CLI frontend for CodingAgentNeo.
+
+The CLI parses arguments, loads configuration, obtains an ``AgentBackend``
+from the assembly layer, and then only sends commands / consumes events.
+It does not hold Loop, Runtime, Store, Environment, ModelClient, or Registry
+objects, and it does not assemble those dependencies.
+"""
 
 from __future__ import annotations
 
@@ -6,39 +12,27 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, TextIO
-from uuid import uuid4
 
 from coding_agent_neo import __version__
-from coding_agent_neo.agent_loop import AgentLoop, AgentLoopResult
-from coding_agent_neo.config import AppConfig, ConfigError, load_config
-from coding_agent_neo.environment.local import LocalExecutionEnvironment
-from coding_agent_neo.events import EventDispatchError, EventEmitter, PendingEvent
-from coding_agent_neo.model_client import OpenAICompatibleModelClient
-from coding_agent_neo.models import AgentId, RuntimeState, SessionId
-from coding_agent_neo.policy import (
-    DefaultExecutionPolicy,
-    InteractiveApprovalPort,
-    NonInteractiveApprovalPort,
+from coding_agent_neo.assembly import build_local_backend
+from coding_agent_neo.backend import (
+    AgentBackend,
+    ApprovalResponse,
+    BackendClosedError,
+    CloseSession,
+    Interrupt,
+    SubmitTask,
 )
+from coding_agent_neo.config import AppConfig, ConfigError, load_config
+from coding_agent_neo.models import EventType, RuntimeState
 from coding_agent_neo.renderer import TerminalRenderer
-from coding_agent_neo.runtime import AgentRuntime, BudgetTracker
-from coding_agent_neo.session import SessionStore
-from coding_agent_neo.tools.registry import default_tool_registry
 
 EXIT_SUCCESS = 0
 EXIT_FAILED = 1
 EXIT_CONFIG = 2
 EXIT_LIMIT_REACHED = 3
 EXIT_INTERRUPTED = 130
-
-SYSTEM_PROMPT = """You are CodingAgentNeo, a local coding assistant. Work only on the user's task.
-Use native tool calls to inspect, edit, and validate the configured workspace. Prefer small,
-verifiable changes and report tests honestly. Structured file tools are workspace-bound. The bash
-tool starts in the workspace but is not an operating-system sandbox and inherits the launching
-user's permissions. Never reveal credentials or claim an unperformed action."""
 
 _CONFIG_OPTIONS = (
     "model",
@@ -113,124 +107,16 @@ def _cli_config_values(args: argparse.Namespace) -> dict[str, Any]:
     return values
 
 
-def build_system_prompt(config: AppConfig) -> str:
-    """Create the explicit prompt; Context Builder never discovers external prompt sources."""
+def exit_code_for(result: RuntimeState | Any) -> int:
+    """Derive a process exit code from ``AgentBackend.last_state`` (T10 contract)."""
 
-    return f"{SYSTEM_PROMPT}\nConfigured logical workspace: {config.workspace.name or '.'}."
-
-
-def _session_path(config: AppConfig, session_id: SessionId) -> Path:
-    return config.session_dir / f"{session_id}.jsonl"
-
-
-def _approval_callback(output: TextIO, input_stream: TextIO) -> Callable[[Any], bool]:
-    def approve(request: Any) -> bool:
-        arguments = getattr(request, "arguments", {})
-        command = arguments.get("command", "") if isinstance(arguments, Mapping) else ""
-        command = command if len(command) <= 300 else f"{command[:297]}…"
-        output.write(f"Approve bash command {json.dumps(command, ensure_ascii=False)}? [y/N] ")
-        output.flush()
-        answer = input_stream.readline()
-        return answer.strip().casefold() in {"y", "yes"}
-
-    return approve
-
-
-@dataclass(slots=True)
-class CliSession:
-    loop: AgentLoop
-    store: SessionStore
-    session_path: Path
-
-    def close(self) -> None:
-        self.loop.close()
-        self.store.close()
-
-
-def assemble_session(
-    config: AppConfig,
-    *,
-    interactive: bool,
-    input_stream: TextIO,
-    event_stream: TextIO,
-    model_client: Any | None = None,
-) -> CliSession:
-    """Explicitly assemble one root Runtime and its source-agnostic dependencies."""
-
-    session_id = SessionId(f"session_{uuid4().hex}")
-    agent_id = AgentId(f"agent_{uuid4().hex}")
-    registry = default_tool_registry()
-    environment = LocalExecutionEnvironment(
-        config.workspace,
-        command_timeout=config.command_timeout,
-        max_output_bytes=config.model_output_limit,
-    )
-    policy = DefaultExecutionPolicy(config.approval_mode, interactive=interactive)
-    budget = BudgetTracker(
-        max_steps=config.max_steps,
-        max_tool_calls=config.max_tool_calls,
-        max_wall_seconds=config.max_wall_seconds,
-    )
-    runtime = AgentRuntime(
-        agent_id=agent_id,
-        session_id=session_id,
-        environment=environment,
-        execution_policy=policy,
-        budget=budget,
-        active_tools=set(registry.active_names),
-    )
-    path = _session_path(config, session_id)
-    store = SessionStore(path, session_id, max_payload_bytes=config.session_output_limit)
-    renderer = TerminalRenderer(event_stream, output_limit=min(config.model_output_limit, 8_000))
-    emitter = EventEmitter(store, [renderer])
-
-    def publish_retry(payload: Mapping[str, Any]) -> None:
-        try:
-            emitter.publish(
-                PendingEvent(
-                    session_id=session_id,
-                    agent_id=agent_id,
-                    type="retry",
-                    payload=payload,
-                )
-            )
-        except EventDispatchError as error:
-            if error.report.event is None:
-                raise
-
-    client = model_client or OpenAICompatibleModelClient(
-        model=config.model,
-        api_key=config.api_key,
-        base_url=config.api_base,
-        retry_observer=publish_retry,
-    )
-    approval_port = (
-        InteractiveApprovalPort(_approval_callback(event_stream, input_stream))
-        if interactive
-        else NonInteractiveApprovalPort()
-    )
-    loop = AgentLoop(
-        client,
-        registry,
-        emitter,
-        runtime,
-        system_prompt=build_system_prompt(config),
-        approval_port=approval_port,
-        interactive=interactive,
-        model_output_limit=config.model_output_limit,
-        context_window=config.context_window,
-        reserved_output_tokens=config.reserved_output_tokens,
-    )
-    return CliSession(loop, store, path)
-
-
-def exit_code_for(result: AgentLoopResult) -> int:
+    state = result if isinstance(result, RuntimeState) else getattr(result, "state", None)
     return {
         RuntimeState.COMPLETED_TURN: EXIT_SUCCESS,
         RuntimeState.LIMIT_REACHED: EXIT_LIMIT_REACHED,
         RuntimeState.INTERRUPTED: EXIT_INTERRUPTED,
         RuntimeState.FAILED: EXIT_FAILED,
-    }.get(result.state, EXIT_FAILED)
+    }.get(state, EXIT_FAILED)
 
 
 def _interactive_task(input_stream: TextIO, output: TextIO, prompt: str) -> str | None:
@@ -243,6 +129,84 @@ def _interactive_task(input_stream: TextIO, output: TextIO, prompt: str) -> str 
     return value or None
 
 
+def _prompt_approval(event: Any, output: TextIO, input_stream: TextIO) -> bool:
+    payload = event.payload if isinstance(getattr(event, "payload", None), Mapping) else {}
+    tool = payload.get("tool_name", "tool")
+    summary = payload.get("arguments_summary", "")
+    if tool == "bash":
+        output.write(f"Approve bash command {summary}? [y/N] ")
+    else:
+        output.write(f"Approve {tool} {json.dumps(summary, ensure_ascii=False)}? [y/N] ")
+    output.flush()
+    answer = input_stream.readline()
+    return answer.strip().casefold() in {"y", "yes"}
+
+
+def _event_name(event: Any) -> str:
+    return str(getattr(event, "type", ""))
+
+
+def _consume_turn(
+    backend: AgentBackend,
+    renderer: TerminalRenderer,
+    *,
+    cursor: int,
+    interactive: bool,
+    input_stream: TextIO,
+    event_stream: TextIO,
+) -> tuple[int, str]:
+    assistant_text = ""
+    for event in backend.events(since=cursor):
+        cursor = event.sequence
+        renderer.render(event)
+        name = _event_name(event)
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        if name == EventType.ASSISTANT_MESSAGE.value:
+            text = payload.get("text")
+            if text:
+                assistant_text = str(text)
+        if name == EventType.APPROVAL_REQUEST.value:
+            request_id = str(payload.get("request_id") or event.correlation_id or "")
+            approved = _prompt_approval(event, event_stream, input_stream) if interactive else False
+            backend.send(ApprovalResponse(request_id, approved))
+        if name == EventType.TURN_END.value:
+            text = payload.get("assistant_text")
+            if text:
+                assistant_text = str(text)
+            return cursor, assistant_text
+    return cursor, assistant_text
+
+
+def _drain_events(
+    backend: AgentBackend,
+    renderer: TerminalRenderer,
+    *,
+    cursor: int,
+) -> int:
+    try:
+        for event in backend.events(since=cursor):
+            cursor = event.sequence
+            renderer.render(event)
+            if _event_name(event) in {
+                EventType.SESSION_END.value,
+                EventType.TURN_END.value,
+            }:
+                if (
+                    backend.last_state
+                    in {
+                        RuntimeState.INTERRUPTED,
+                        RuntimeState.FAILED,
+                        RuntimeState.LIMIT_REACHED,
+                        RuntimeState.COMPLETED_TURN,
+                    }
+                    and _event_name(event) == EventType.SESSION_END.value
+                ):
+                    break
+    except (KeyboardInterrupt, BackendClosedError):
+        return cursor
+    return cursor
+
+
 def run_cli(
     config: AppConfig,
     *,
@@ -251,43 +215,58 @@ def run_cli(
     input_stream: TextIO,
     output_stream: TextIO,
     error_stream: TextIO,
-    session_factory: Callable[..., CliSession] | None = None,
+    backend_factory: Callable[..., AgentBackend] | None = None,
 ) -> int:
     """Run after configuration and task-source validation have completed."""
 
     event_stream = output_stream if interactive else error_stream
-    factory = assemble_session if session_factory is None else session_factory
-    session = factory(
-        config,
-        interactive=interactive,
-        input_stream=input_stream,
-        event_stream=event_stream,
-    )
-    last_result: AgentLoopResult | None = None
+    factory = build_local_backend if backend_factory is None else backend_factory
+    backend = factory(config, interactive=interactive)
+    renderer = TerminalRenderer(event_stream, output_limit=min(config.model_output_limit, 8_000))
+    cursor = 0
+    ran_turn = False
+    assistant_text = ""
     try:
         current = task
         if interactive and current is None:
             current = _interactive_task(input_stream, output_stream, "task> ")
         while current is not None:
-            last_result = session.loop.run_turn(current)
-            if not interactive or last_result.state is not RuntimeState.COMPLETED_TURN:
+            backend.send(SubmitTask(current))
+            ran_turn = True
+            cursor, assistant_text = _consume_turn(
+                backend,
+                renderer,
+                cursor=cursor,
+                interactive=interactive,
+                input_stream=input_stream,
+                event_stream=event_stream,
+            )
+            if not interactive or backend.last_state is not RuntimeState.COMPLETED_TURN:
                 break
             current = _interactive_task(input_stream, output_stream, "follow-up> ")
-        if last_result is None:
+        if not ran_turn:
             return EXIT_SUCCESS
-        if not interactive and last_result.assistant_text:
-            output_stream.write(f"{last_result.assistant_text}\n")
+        if not interactive and assistant_text:
+            output_stream.write(f"{assistant_text}\n")
             output_stream.flush()
-        return exit_code_for(last_result)
+        return exit_code_for(backend.last_state)
     except KeyboardInterrupt:
-        session.loop.runtime.cancellation.cancel("keyboard_interrupt")
-        session.loop.state = RuntimeState.INTERRUPTED
+        try:
+            backend.send(Interrupt("keyboard_interrupt"))
+        except BackendClosedError:
+            pass
+        try:
+            backend.send(CloseSession("keyboard_interrupt"))
+        except BackendClosedError:
+            pass
+        _drain_events(backend, renderer, cursor=cursor)
         return EXIT_INTERRUPTED
     finally:
         try:
-            session.loop.close(reason="cli_exit")
-        finally:
-            session.store.close()
+            backend.send(CloseSession("cli_exit"))
+        except BackendClosedError:
+            pass
+        backend.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -330,15 +309,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
-    "CliSession",
     "EXIT_CONFIG",
     "EXIT_FAILED",
     "EXIT_INTERRUPTED",
     "EXIT_LIMIT_REACHED",
     "EXIT_SUCCESS",
-    "assemble_session",
     "build_parser",
-    "build_system_prompt",
     "exit_code_for",
     "main",
     "run_cli",

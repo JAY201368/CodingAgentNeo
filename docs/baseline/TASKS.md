@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T10 已接受
+> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T10、T14 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T10 已完成，用户已确认下一个执行目标为 T14。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T14 已接受，下一个依赖就绪任务为 T11。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -208,7 +208,7 @@ flowchart TD
 
 **完成摘要（2026-08-29）:** 已交付 CLI > `CODING_AGENT_NEO_*` 环境变量 > 未入库 `.coding-agent-neo.toml` > 默认值的配置解析与副作用前校验，API key 只按环境变量名解析且不进入 repr/诊断；完成显式 system prompt、六个内置工具、root Runtime、Local Environment、Store-first EventEmitter/Renderer 和 OpenAI-compatible ModelClient 的组装。交互模式支持初始任务、bash 确认、turn 后 follow-up 与 Ctrl+C，非交互模式支持 `--task`/stdin、ask 立即拒绝与 auto/yolo；stdout/stderr 和退出码契约、默认可解析 JSONL session、有界事件展示、retry/compaction/预算统计均有测试与文档。主 Agent 在 Python 3.12.11 `.venv` 中独立复验定向测试 `17 passed`、全量 `166 passed`，Ruff lint/format-check、`python -m build`、workflow validator、CLI help 与 `git diff --check` 均通过；未执行真实网关调用，session resume、完整 TUI 与 Skill/MCP 具体接入仍明确排除。
 
-### [ ] T14 — 交付前端与 Agent 后端的命令/事件解耦
+### [x] T14 — 交付前端与 Agent 后端的命令/事件解耦
 
 **依赖:** T10
 
@@ -225,6 +225,8 @@ flowchart TD
 - T05、T06、T08、T09、T10 的既有测试在不放宽断言的前提下全部通过；线程相关测试通过注入的超时参数保证确定性。
 
 **验证:** `python -m pytest tests/unit/test_backend.py tests/unit/test_renderer.py tests/integration/test_cli.py tests/integration/test_frontend_contract.py tests/architecture/test_forbidden_dependencies.py`; `python -m pytest`; `python -m ruff check .`; `python -m ruff format --check .`; `python -m build`。
+
+**完成摘要（2026-08-30）:** 已交付 `AgentCommand`/`AgentBackend` 契约、`assembly.py` 的 `build_local_backend`、同进程 `LocalAgentBackend`（单 worker 线程、命令分发、Event Stream 游标缓冲、Channel Approval Port），以及只发命令、按 sequence 游标拉事件的 CLI 前端；`renderer.py` 不再订阅 EventEmitter。交互 `ask` 先持久化 `approval_request` 再等待 `ApprovalResponse`；超时/`Interrupt`/`close()`/`request_id` 不匹配 fail-closed 拒绝且无 Environment 副作用；非交互 `ask` 仍在 policy 层拒绝且不发请求。T10 的 CLI 选项、stdout/stderr 与退出码 `0/1/2/3/130` 保持不变，退出码由 `last_state` 推导。未改 `agent_loop.py`/`executor.py`/`policy.py`/`events.py` 行为，未实现 resume。主 Agent 独立复验定向测试 32 passed、T05/T06/T08/T09/T10 回归矩阵 107 passed、全量 `185 passed`，Ruff lint/format-check、`python -m build`、CLI help、workflow validator 与 `git diff --check` 均通过。
 
 ### [ ] T11 — 交付线性 Session 恢复与 follow-up
 

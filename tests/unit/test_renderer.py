@@ -107,10 +107,24 @@ def test_renderer_shows_core_facts_and_counts() -> None:
             },
         )
     )
+    renderer.publish(
+        event(
+            8,
+            EventType.APPROVAL_REQUEST,
+            {
+                "request_id": "correlation-1",
+                "tool_name": "bash",
+                "arguments_summary": '"pytest"',
+                "timeout_seconds": 30,
+            },
+        )
+    )
     rendered = output.getvalue()
     assert "retry> reason=rate_limit attempt=1/3" in rendered
     assert "compaction> status=success" in rendered
     assert "elapsed=1.250s" in rendered
+    assert "approval-request> bash" in rendered
+    assert "timeout=30s" in rendered
 
 
 def test_renderer_bounds_large_output() -> None:

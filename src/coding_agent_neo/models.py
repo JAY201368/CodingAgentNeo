@@ -209,6 +209,7 @@ class EventType(StrEnum):
     ASSISTANT_MESSAGE = "assistant_message"
     TOOL_CALL = "tool_call"
     POLICY_DECISION = "policy_decision"
+    APPROVAL_REQUEST = "approval_request"
     TOOL_RESULT = "tool_result"
     COMPACTION = "compaction"
     RETRY = "retry"

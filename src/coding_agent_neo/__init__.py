@@ -8,6 +8,17 @@ from coding_agent_neo.agent_loop import (
     SimpleContextBuilder,
     TurnResult,
 )
+from coding_agent_neo.assembly import build_local_backend, build_system_prompt
+from coding_agent_neo.backend import (
+    AgentBackend,
+    ApprovalResponse,
+    BackendClosedError,
+    CloseSession,
+    Interrupt,
+    LocalAgentBackend,
+    SubmitTask,
+    TurnInProgressError,
+)
 from coding_agent_neo.compactor import (
     COMPACTION_INSTRUCTION,
     CompactionError,
@@ -126,12 +137,16 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ActiveToolsMismatchError",
+    "AgentBackend",
     "AgentId",
     "AgentLoop",
     "AgentLoopResult",
     "AgentRuntime",
     "AppConfig",
+    "ApprovalResponse",
+    "BackendClosedError",
     "BudgetTracker",
+    "CloseSession",
     "CancelledError",
     "CancellationRequested",
     "CancellationSignal",
@@ -219,6 +234,12 @@ __all__ = [
     "SessionWriteError",
     "SimpleContextBuilder",
     "IncompleteSessionTailError",
+    "Interrupt",
+    "LocalAgentBackend",
+    "SubmitTask",
+    "TurnInProgressError",
+    "build_local_backend",
+    "build_system_prompt",
     "SubscriberDelivery",
     "ToolCall",
     "ToolExecutionContext",
