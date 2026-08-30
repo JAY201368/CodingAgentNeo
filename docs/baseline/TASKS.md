@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-28 通过用户变更审阅；T01、T02、T03、T04、T05、T06、T07、T08 已接受
+> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T10 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T08 已完成，本轮未授权继续派发后续任务。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T10 已完成，用户已确认下一个执行目标为 T14。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -33,9 +33,10 @@ flowchart TD
     T06 --> T10
     T07 --> T10
     T09 --> T10
+    T10 --> T14
     T06 --> T11
     T09 --> T11
-    T10 --> T11
+    T14 --> T11
     T11 --> T12
     T12 --> T13
 ```
@@ -207,10 +208,30 @@ flowchart TD
 
 **完成摘要（2026-08-29）:** 已交付 CLI > `CODING_AGENT_NEO_*` 环境变量 > 未入库 `.coding-agent-neo.toml` > 默认值的配置解析与副作用前校验，API key 只按环境变量名解析且不进入 repr/诊断；完成显式 system prompt、六个内置工具、root Runtime、Local Environment、Store-first EventEmitter/Renderer 和 OpenAI-compatible ModelClient 的组装。交互模式支持初始任务、bash 确认、turn 后 follow-up 与 Ctrl+C，非交互模式支持 `--task`/stdin、ask 立即拒绝与 auto/yolo；stdout/stderr 和退出码契约、默认可解析 JSONL session、有界事件展示、retry/compaction/预算统计均有测试与文档。主 Agent 在 Python 3.12.11 `.venv` 中独立复验定向测试 `17 passed`、全量 `166 passed`，Ruff lint/format-check、`python -m build`、workflow validator、CLI help 与 `git diff --check` 均通过；未执行真实网关调用，session resume、完整 TUI 与 Skill/MCP 具体接入仍明确排除。
 
+### [ ] T14 — 交付前端与 Agent 后端的命令/事件解耦
+
+**依赖:** T10
+
+**范围:** 按 `ARCHITECTURE.md` 6.6 实现 `AgentCommand` 与 `AgentBackend` 契约、`assembly.py` 组装入口、`backend.py` 的 `LocalAgentBackend`（单 worker 线程、命令分发、Event Stream 游标缓冲、Channel Approval Port 与 `approval_request` 事件），并把 `cli.py` 改写成只依赖该契约的前端；`renderer.py` 由前端事件循环驱动，不再订阅 EventEmitter。保持现有 CLI 选项、stdout/stderr 与退出码契约不变。排除 Web GUI/HTTP 前端、跨进程传输、运行中 steering 或后台输入队列、session resume 业务、完整 TUI、`agent_loop.py`/`executor.py`/`policy.py`/`events.py` 的行为变更。
+
+**验收:**
+
+- `cli.py` 不再 import `AgentLoop`、`AgentRuntime`、`SessionStore`、`LocalExecutionEnvironment`、`ModelClient` 实现或 `ToolRegistry`；静态检查证明 `backend.py`/`assembly.py` 及其下游不 import `cli.py`/`renderer.py`，也不直接使用 `sys.stdin`/`sys.stdout`/`sys.stderr`。
+- 交互模式 bash 确认走完整反转链路：`approval_request` 事件先落盘，前端回 `ApprovalResponse` 后才执行；批准与拒绝都产生同 correlation ID 的 `policy_decision`，行为与 T10 一致。
+- approval fail-closed 有测试：等待超时、`Interrupt`、`close()` 和 `request_id` 不匹配四种情况均按拒绝处理且不触发 Environment 副作用；非交互 `ask` 仍在 policy 层直接拒绝，不发出 `approval_request`。
+- `events(since=n)` 返回的事件 sequence 连续、无重复、与 JSONL 一致；中途停止迭代后用新游标重新进入可拿到完整后续事件；前端渲染缓慢不阻塞 Loop 与持久化。
+- turn 执行期间提交 `SubmitTask` 被明确拒绝；`Interrupt` 能在有界时间内让运行中的 bash 命令停止并以 `INTERRUPTED` 与退出码 130 结束。
+- `--help`、成功、配置失败、`FAILED`、`LIMIT_REACHED`、`INTERRUPTED` 的退出码与 stdout/stderr 契约与 T10 完全一致，退出码由 `last_state` 推导；非交互 `--task`/stdin 与 `--yolo` 行为不变。
+- T05、T06、T08、T09、T10 的既有测试在不放宽断言的前提下全部通过；线程相关测试通过注入的超时参数保证确定性。
+
+**验证:** `python -m pytest tests/unit/test_backend.py tests/unit/test_renderer.py tests/integration/test_cli.py tests/integration/test_frontend_contract.py tests/architecture/test_forbidden_dependencies.py`; `python -m pytest`; `python -m ruff check .`; `python -m ruff format --check .`; `python -m build`。
+
 ### [ ] T11 — 交付线性 Session 恢复与 follow-up
 
-**依赖:** T06, T09, T10  
-**范围:** 实现 `--resume` 加载、schema/session/sequence 校验、损坏尾行诊断、root Runtime 状态重建、最新 compaction 投影和 follow-up；绝不重放历史工具副作用。排除 branch/fork/tree 和 child Agent 恢复。  
+**依赖:** T06, T09, T14
+
+**范围:** 实现 `--resume` 加载、schema/session/sequence 校验、损坏尾行诊断、root Runtime 状态重建、最新 compaction 投影和 follow-up；绝不重放历史工具副作用。恢复在 `assembly.py` 的组装入口完成，`cli.py` 只传递选项并按既有游标语义消费事件。排除 branch/fork/tree 和 child Agent 恢复。
+
 **验收:**
 
 - 正常 session 恢复相同 session/root agent ID、预算计数、active tools、取消合理初值和最新有效 context，随后可接受 follow-up。
@@ -218,7 +239,7 @@ flowchart TD
 - 恢复过程中 fake/local environment 均未收到历史写文件或命令调用；只执行新 follow-up 产生的调用。
 - 恢复后的事件 sequence 接续且无重复，新的 compaction/turn/session 事件仍可解析。
 
-**验证:** `python -m pytest tests/unit/test_session_recovery.py tests/integration/test_resume_cli.py`; `python -m ruff check src/coding_agent_neo/session.py src/coding_agent_neo/cli.py tests`。
+**验证:** `python -m pytest tests/unit/test_session_recovery.py tests/integration/test_resume_cli.py`; `python -m ruff check src/coding_agent_neo/session.py src/coding_agent_neo/assembly.py src/coding_agent_neo/cli.py tests`。
 
 ## 阶段 E：验收、说明与提交准备
 
@@ -231,7 +252,7 @@ flowchart TD
 
 - AC-02～AC-14 均有自动化或明确可复现证据，覆盖协议/工具失败、逃逸、权限、轨迹、resume、compaction、限制、secret、Environment 替换、Runtime 隔离、ID 关联和生命周期。
 - AC-01 在小型仓库完成探索、搜索、修改、测试失败后修正和最终总结；若使用真实 API，模型/网关与时间被记录但凭据不落盘。
-- 静态检查确认工作区 Tool 无宿主 I/O/进程、只有 LocalEnvironment 含通用宿主文件/命令副作用、Loop 无工具来源分支和进程级可变运行状态、Context Builder 不扫描 Skill 或外部资源。
+- 静态检查确认工作区 Tool 无宿主 I/O/进程、只有 LocalEnvironment 含通用宿主文件/命令副作用、Loop 无工具来源分支和进程级可变运行状态、Context Builder 不扫描 Skill 或外部资源、前端不持有 Agent 对象且后端不依赖终端 I/O。
 - fake 边界证据只证明显式 system prompt 和通用 Tool 可注入，不得将其表述为已实现或验证 Skill/MCP。
 - 全量 lint、format-check、test、build 通过；任何不可用外部服务或平台验证明确保留为限制，不能以 mock 冒充。
 
@@ -252,4 +273,4 @@ flowchart TD
 
 ## 推荐顺序
 
-依赖相同时优先沿关键路径推进：T01 → T02 → T03 → T04 → T05 → T06 → T07 → T08 → T09 → T10 → T11 → T12 → T13。实际选择仍以“依赖全部勾选且有证据”为准，不允许因推荐顺序跳过依赖。
+依赖相同时优先沿关键路径推进：T01 → T02 → T03 → T04 → T05 → T06 → T07 → T08 → T09 → T10 → T14 → T11 → T12 → T13。T14 排在 T11 之前，是为了让 resume 直接建立在解耦后的组装入口上，避免在旧结构上实现一次再返工。实际选择仍以“依赖全部勾选且有证据”为准，不允许因推荐顺序跳过依赖。

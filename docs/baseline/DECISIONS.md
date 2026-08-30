@@ -92,3 +92,12 @@
 - 选择：默认本地配置文件为已忽略的 `.coding-agent-neo.toml`，可用 `--config` 或 `CODING_AGENT_NEO_CONFIG` 选择其他路径；非交互最终 assistant 文本单独写 stdout，事件/诊断写 stderr。进程退出码固定为完成 `0`、`FAILED`/启动失败 `1`、用法/配置失败 `2`、`LIMIT_REACHED` `3`、`INTERRUPTED` `130`。
 - 理由与替代：单独 stdout 让 shell 脚本可直接消费最终结果，同时 stderr 保留可观察轨迹；`130` 遵循 SIGINT 的常见 shell 约定，独立的 limit 码可避免与系统失败混淆。本地 TOML 只保存 API key 环境变量名，不接受 key 值。
 - 后果：T11 的 `--resume` 业务必须保持这些 stdio/退出码与 secret 契约；完整 TUI、Skill/MCP 配置仍不在该配置面中。
+
+## 2026-08-30 — ARCH 前端与 Agent 后端以命令/事件解耦
+
+- 选择：引入 `AgentBackend` 作为前端可见的唯一后端接口，只有 `send(command)`、`events(since=sequence)`、`last_state` 和 `close()`。命令集合固定为 `SubmitTask`、`ApprovalResponse`、`Interrupt`、`CloseSession`。依赖组装从 `cli.py` 迁到 `assembly.py`，`backend.py` 拥有契约、Event Stream 与 `LocalAgentBackend`；`cli.py` 降级为一个只发命令、只读事件的前端，`renderer.py` 由前端事件循环驱动而不再订阅 EventEmitter。
+- 线程归属：Loop 在后端独占的单个 worker 线程中运行，因此 `send` 非阻塞。`SubmitTask`/`CloseSession` 进 worker 队列；`ApprovalResponse` 与 `Interrupt` 必须在 turn 执行中生效，因此直接在调用者线程上交给挂起的 approval 通道或 Runtime cancellation。线程只属于 Backend 适配层，`agent_loop.py`、`executor.py`、`policy.py`、`events.py` 的行为不变，"每进程一个前台同步 Loop" 的语义也不变。
+- approval 反转：`ask` 不再由后端调用一个会读终端的 callback，而是发布 `approval_request` 事件后阻塞等待前端的 `ApprovalResponse`。等待超时、`Interrupt`、`close()` 和 `request_id` 不匹配一律 fail-closed 视为拒绝，原因写入 `policy_decision`；前端不可用绝不退化为自动批准。非交互模式仍在 policy 层直接拒绝，不产生请求。
+- 事件流：不修改 `events.py`，改为新增一个只做“追加到缓冲并唤醒等待者”的订阅者。事件必须先由 Session Store 分配 sequence 并落盘才对前端可见，因此 UI 与审计轨迹不会分叉；sequence 同时就是游标，断线续订只需记住最后一个值。拉取模型天然隔离慢消费者，不需要额外的 lag 语义或环形缓冲。
+- 理由与替代：把 `run_turn` 改成生成器由前端驱动可以零线程且完全确定，但 approval 发生在 executor 深处，需要把整条调用栈改成 `yield from`，改动面和风险都远大于线程方案。只抽出组装层而保留阻塞回调则不构成真解耦，进程外前端仍然无法接入。
+- 边界与后果：Web GUI、HTTP/跨进程传输、运行中 steering 和后台输入队列仍是明确排除项——turn 执行期间提交新任务是错误而不是排队，以保持 FR-05 的范围。Ctrl+C 语义从"异常直接从 Loop 栈内抛出"变为"前端捕获后转 `Interrupt` 命令"；因为 `CancellationSignal` 是 `threading.Event` 且 `LocalExecutionEnvironment` 在等待子进程时轮询它，运行中的命令仍会被真正打断。T11 的 resume 在 `assembly.py` 完成，T12 的静态审查需增加"前端不持有 Agent 对象、后端不依赖终端 I/O"一项。本决策不触及需求正文第 22 节的任何变更条件，因此不构成需求基线变更。
