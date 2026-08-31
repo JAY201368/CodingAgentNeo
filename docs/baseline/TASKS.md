@@ -7,7 +7,7 @@
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T12 已接受，下一个依赖就绪任务为 T13（不含录制介绍视频）。
+- 开始任何任务前必须取得用户对当前执行范围的授权；当前 T01～T14 的基线任务 DAG 已全部接受，无剩余依赖就绪实现卡。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -264,7 +264,7 @@ flowchart TD
 
 **完成摘要（2026-08-31）:** 已建立 AC-01～AC-14 聚合验收套件（`tests/acceptance/` + `acceptance` marker）、扩展静态依赖审查、`tests/fixtures/buggy_counter` 小型缺陷仓库，以及 `docs/acceptance-runbook.md`。AC-01 用 scripted fake model + `LocalExecutionEnvironment` 在 fixture 副本上完成探索、搜索、错误修改、验证失败后修正、无 tool call 总结，并注入非内置 fake Tool 证明 Loop 无来源分支；AC-02～AC-14 引用既有自动化证据而非整文件复制。同日用户手动以 `kimi-k3` / `dashscope.aliyuncs.com` 在 gitignored `temp/ac01-buggy-counter` 上完成真实网关演练：探索、搜索、修改、`python verify.py` 通过、无 tool call 总结；第一次编辑已正确，故未观察到“失败后修正”。凭据未入库。主 Agent 独立复验 Ruff lint/format-check 通过、全量 pytest **262 passed**、`pytest tests/acceptance -m acceptance` **50 passed**、`python -m build`、CLI help、workflow validator 与 `git diff --check` 均通过。未改公开 CLI/数据模型契约，未实现 Docker/子 Agent/Skill/MCP，未做 T13 交付物。
 
-### [ ] T13 — 准备可审计的 README 与演示脚本初稿
+### [x] T13 — 准备可审计的 README 与演示脚本初稿
 
 **依赖:** T12  
 **范围:** 根据已验证的真实功能完成不超过 1000 汉字的 `README.txt` 初稿、运行/安全说明，以及一份可后续用于录制的演示脚本。文案允许后续迭代。排除：录制介绍/演示视频、产出 mp4、检查视频时长/大小、制作含视频的提交 zip。公开仓库地址可用占位符。外部发布、推送、录屏和最终提交必须由用户明确执行或授权，不在任务中擅自进行。  
@@ -276,6 +276,8 @@ flowchart TD
 - 架构、任务、进度和决策描述同一基线系统，所有勾选任务均有验证证据；skill 结构校验通过。
 
 **验证:** `python -m pytest`; `python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/baseline`; README 字数检查；人工审阅演示脚本。不运行 `ffprobe`，不验收 mp4。
+
+**完成摘要（2026-08-31）:** 已交付根目录 `README.txt` 初稿、`docs/demo-script.md` 演示脚本和非阻塞的 `docs/final-submission-memo.txt`，并最小修正 `README.md` 中过时的 `--resume` 说明。README 包含仓库地址占位、可复现运行步骤、真实特色、安全边界与限制；按“去空白、命令和标点计入、不含计数说明行”的 Unicode 字符口径正文为 **960**，含计数说明的全文为 **999**。演示脚本覆盖探索、搜索、修改、验证、总结、审批、JSONL、compaction、resume 与 Backend 解耦，明确 session 目录位于 workspace 外、真实 key 在录制前的未录制环境中预置，并区分 scripted 失败修正证据与真实网关一次改对。主 Agent 独立复验 `.venv` Python 3.12.11 下全量 pytest **262 passed**、acceptance **50 passed**、Ruff lint/format、build、workflow validator（14 tasks）、凭据/私密路径扫描与 `git diff --check` 均通过；人工审阅演示脚本通过。未运行 `ffprobe`，未录制或验收 mp4，未创建最终 zip，也未发布、推送或外部提交。
 
 ## 推荐顺序
 
