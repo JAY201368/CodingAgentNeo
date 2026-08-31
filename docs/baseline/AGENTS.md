@@ -62,7 +62,7 @@
 | Agent Loop/Context | scripted model 集成测试，覆盖通用 fake Tool、显式 system prompt、成功、失败修正、限制、中断、压缩和 Runtime 隔离；不以 fake 声称 Skill/MCP 已集成 |
 | JSONL/恢复 | append/flush、截断、损坏尾部、sequence、无副作用重放测试 |
 | CLI/配置/渲染 | 子进程集成测试、覆盖顺序、退出码、stdin/approval/Ctrl+C、大输出展示 + build |
-| 交付物 | 全量质量门、脱敏真实任务 runbook、README 字数、视频时长/大小和人工清单 |
+| 交付物 | 全量质量门、脱敏真实任务 runbook、README 字数和演示脚本审阅；本基线不要求产出或检查 mp4 |
 
 只运行最小矩阵不足以接受任务时，以任务卡更严格的 Verification 为准。命令未运行、跳过或因环境失败时必须原样报告。
 

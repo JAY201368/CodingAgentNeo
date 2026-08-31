@@ -1,7 +1,7 @@
 # CodingAgentNeo 当前进度
 
 > 更新日期：2026-08-31
-> 当前阶段：Execute — T12 已接受，下一个依赖就绪任务为 T13
+> 当前阶段：Change control 已纳入 — T12 已接受，下一个依赖就绪任务为 T13（不含录制介绍视频）
 
 ## Completed
 
@@ -26,22 +26,23 @@
 - 仓库现有可运行的交互/非交互 CLI：通过 `AgentBackend` 发命令、按游标拉事件，并可用 `--resume` 从线性 JSONL 继续 follow-up。至少完成一次 turn 后，进程退出时会在诊断流提示 `coding-agent-neo --resume <session_id>`。
 - T01、T02、T03、T04、T05、T06、T07、T08、T09、T10、T14、T11、T12 均已通过各自专用 worker 验证和主 Agent 独立复验。
 - 2026-08-30 用户发起前后端解耦变更并完成审阅：架构基线升到 0.3。T14 与 T11 已按该契约落地；需求基线保持 v1.2。
+- 2026-08-31 用户明确本基线不是最终提交版本：架构升到 0.4，介绍视频录制从基线实现与 T13 验收中排除；README 与演示脚本仍可先写初稿。
 - 标准命令 `python -m pytest tests/acceptance -m acceptance` 现收集并运行 50 项；复现步骤见 `docs/acceptance-runbook.md`。
-- 任务顺序仍为 T10 → T14 → T11 → T12 → T13。
+- 任务顺序仍为 T10 → T14 → T11 → T12 → T13。2026-08-31 用户明确：本基线不是最终提交版本，T13 只写 README 与演示脚本初稿，不录制介绍视频。
 
 ## Known Issues
 
 - 已有一次真实网关 AC-01：用户于 2026-08-31 用 `kimi-k3` / `dashscope.aliyuncs.com` 在 `temp/ac01-buggy-counter` 上非交互跑通，结束 `COMPLETED_TURN`（5 steps / 7 tools），`python verify.py` 退出 0。该次第一次编辑即正确，**未**观察到“根据失败结果修正”；该步仍只由 scripted 套件覆盖。未做跨平台 Environment 验证。LocalEnvironment 组件证据来自 macOS Python 3.12.11，shell 仍继承启动用户权限，不是操作系统沙箱。
-- 真实演练把 `--session-dir` 放在 workspace 内，`search` 命中正在写入的 JSONL，终端刷出超长行。T13 演示应把 session 目录放到工作区外。
+- 真实演练把 `--session-dir` 放在 workspace 内，`search` 命中正在写入的 JSONL，终端刷出超长行。T13 演示脚本应把 session 目录放到工作区外。
 - 尚无且首版不要求 Skill 目录发现/解析/加载或 MCP 客户端/配置/传输证据；T08/T09/T12 的 fake Tool 和显式 prompt 测试只验证核心边界，不代表这两项集成已完成。
 - `tests/acceptance` 聚合套件已建立并被 T12 接受：`pytest tests/acceptance -m acceptance` 收集并运行 50 项。真实 API 脱敏记录见 `docs/acceptance-runbook.md`。
-- T13 涉及公开仓库、视频与外部提交的人工/授权步骤，不能由自动化测试单独证明。
+- 介绍/演示视频录制、mp4 时长/大小检查和含视频的提交 zip 不在本基线范围；题目原始材料中的视频要求推迟到后续最终版本。T13 只交付 README 与演示脚本初稿，文案可再迭代。公开仓库推送与外部提交仍须用户明确执行或授权，不能由自动化测试单独证明。
 - T14 线程相关测试注入了 approval/shutdown/event-poll 超时；生产默认值为 approval 120s、worker 停机 30s、事件轮询 0.1s。未验证跨进程或网络前端。
 - 恢复后的首次 follow-up 会再追加一组 `session_start`/`agent_start`（新进程启动，不是重放历史工具）；JSONL 中可能出现多组 start/end。
 - README 仍可能写 `--resume` reserved；与实现不一致，计划由 T13 按真实功能改写。
-- 距 T13 记录的 2026-09-02 24:00 提交时限只剩约两天；T13 尚未开始。
+- 题目原始材料的 2026-09-02 24:00 提交时限仍存在，但录制视频与姓名.zip 属于后续最终版本，不是 T13 的通过条件。T13 尚未开始。
 - 宿主 Homebrew Python 的直接安装命令受 PEP 668 限制；在 Python 3.12 `.venv` 中执行同一安装命令并完成全部 T01 质量门。
 
 ## Next Recommended Task
 
-- T13（准备可审计的 README、演示与提交清单）的依赖 T12 已勾选且有验证证据，因此它是下一个应派发的任务。外部发布、推送、录屏和提交仍须用户明确执行或授权。
+- T13（准备可审计的 README 与演示脚本初稿）的依赖 T12 已勾选且有验证证据，因此它是下一个应派发的任务。不录制介绍视频，不验收 mp4。外部发布、推送、录屏和最终提交仍须用户明确执行或授权。

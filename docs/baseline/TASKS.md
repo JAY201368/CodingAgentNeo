@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T12、T14 已接受
+> 状态：已于 2026-08-31 纳入基线范围澄清（T13 不含录制介绍视频）；T01～T12、T14 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T12 已接受，下一个依赖就绪任务为 T13。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T12 已接受，下一个依赖就绪任务为 T13（不含录制介绍视频）。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -264,18 +264,18 @@ flowchart TD
 
 **完成摘要（2026-08-31）:** 已建立 AC-01～AC-14 聚合验收套件（`tests/acceptance/` + `acceptance` marker）、扩展静态依赖审查、`tests/fixtures/buggy_counter` 小型缺陷仓库，以及 `docs/acceptance-runbook.md`。AC-01 用 scripted fake model + `LocalExecutionEnvironment` 在 fixture 副本上完成探索、搜索、错误修改、验证失败后修正、无 tool call 总结，并注入非内置 fake Tool 证明 Loop 无来源分支；AC-02～AC-14 引用既有自动化证据而非整文件复制。同日用户手动以 `kimi-k3` / `dashscope.aliyuncs.com` 在 gitignored `temp/ac01-buggy-counter` 上完成真实网关演练：探索、搜索、修改、`python verify.py` 通过、无 tool call 总结；第一次编辑已正确，故未观察到“失败后修正”。凭据未入库。主 Agent 独立复验 Ruff lint/format-check 通过、全量 pytest **262 passed**、`pytest tests/acceptance -m acceptance` **50 passed**、`python -m build`、CLI help、workflow validator 与 `git diff --check` 均通过。未改公开 CLI/数据模型契约，未实现 Docker/子 Agent/Skill/MCP，未做 T13 交付物。
 
-### [ ] T13 — 准备可审计的 README、演示与提交清单
+### [ ] T13 — 准备可审计的 README 与演示脚本初稿
 
 **依赖:** T12  
-**范围:** 根据真实功能和验证结果完成不超过 1000 汉字的 `README.txt`、运行/安全说明、2 分钟演示脚本与录制清单、公开仓库/zip/截止时间检查表。外部发布、推送、录屏和提交必须由用户明确执行或授权，不在任务中擅自进行。  
+**范围:** 根据已验证的真实功能完成不超过 1000 汉字的 `README.txt` 初稿、运行/安全说明，以及一份可后续用于录制的演示脚本。文案允许后续迭代。排除：录制介绍/演示视频、产出 mp4、检查视频时长/大小、制作含视频的提交 zip。公开仓库地址可用占位符。外部发布、推送、录屏和最终提交必须由用户明确执行或授权，不在任务中擅自进行。  
 **验收:**
 
 - README.txt 包含公开仓库地址占位/最终值、可复现运行步骤、真实特色与限制，不含 API Key，正文满足 1000 汉字限制。
-- 演示脚本覆盖真实任务闭环和关键设计解释；最终 mp4 人工确认不超过 2 分钟、200 MB，画面/日志无凭据和私密路径。
-- 提交清单核对公开仓库为题目后新建、历史未压缩改写、2026-09-02 24:00（北京时间）后不再推送，以及“姓名.zip”只含 README.txt 和视频。
-- 架构、任务、进度和决策描述同一最终系统，所有勾选任务均有验证证据；skill 结构校验通过。
+- 演示脚本覆盖真实任务闭环和关键设计解释，写明 session 目录放在工作区外，并标注后续录制时禁止出现凭据和私密路径；不要求仓库内存在 mp4，也不把视频时长/大小作为本卡通过条件。
+- 可另附一份“最终提交仍待完成”的备忘（含后续录制视频、姓名.zip），但这份备忘不是本卡的阻塞验收项。
+- 架构、任务、进度和决策描述同一基线系统，所有勾选任务均有验证证据；skill 结构校验通过。
 
-**验证:** `python -m pytest`; `python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/baseline`; README 字数检查；`ffprobe` 检查最终视频时长/大小；人工提交清单审阅。
+**验证:** `python -m pytest`; `python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/baseline`; README 字数检查；人工审阅演示脚本。不运行 `ffprobe`，不验收 mp4。
 
 ## 推荐顺序
 
