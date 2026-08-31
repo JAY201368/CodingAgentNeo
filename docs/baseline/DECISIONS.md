@@ -115,3 +115,17 @@
 - 选择：至少完成一次 turn 后，CLI 在退出前写出 `To continue this session, run: coding-agent-neo --resume <session_id>`。非交互写 stderr，交互写 stdout；未提交任务不提示。`--session-dir` 不是默认 `.coding-agent-neo/sessions` 时附带该选项。session ID 从前端已消费的事件信封读取，不扩大 `AgentBackend` 契约。
 - 理由与替代：T10 把非交互 stdout 留给最终 assistant 文本，提示放进 stdout 会破坏脚本消费；把提示放进 renderer 会让展示层知道 CLI 语法。不附带全部原始 flags，避免把模型名或工作区噪声复制进下一命令；session 目录一旦不是默认值，不带 `--session-dir` 则复制后找不到文件。
 - 后果：T12 验收与演示可直接引用该提示；非交互 stdout 契约保持 `assistant_text + newline`。
+
+## 2026-08-31 — T12 验收套件聚合既有证据，真实 API 不由 mock 冒充
+
+- 选择：`tests/acceptance/` 通过目录级 `acceptance` marker 聚合 AC-01～AC-14。AC-02～AC-14 引用并重新调用既有测试，而不是复制整文件。AC-01 的自动化证据是把 `tests/fixtures/buggy_counter` 复制到临时目录后，用 scripted fake model + `LocalExecutionEnvironment` 完成探索、搜索、错误修改、验证失败、修正、无 tool call 总结；同时注入非内置 fake Tool `record_note` 证明 Loop 无来源分支。
+- 真实网关：仅当 `OPENAI_API_KEY`（或配置的 `api_key_env`）在运行环境中可读时，才按 `docs/acceptance-runbook.md` 在 gitignored `temp/` 上以 `--approval-mode auto` 演练。本次进程与用户 shell 均无该变量，记为 skipped；不得用 fake model 声称真实 API 已通过。
+- fake 边界：显式 system prompt 和通用 Tool 可注入只证明这两条窄扩展缝；文档与测试均不得将其表述为 Skill/MCP 已实现或已验证。
+- 后果：标准命令 `python -m pytest tests/acceptance -m acceptance` 必须收集并运行验收项。T12 不改公开 CLI/数据模型契约；T13 再写面向用户的 README.txt/视频。
+
+## 2026-08-31 — T12 真实网关 AC-01 由用户手动补证，不改写 skipped 历史
+
+- 选择：把用户在 `temp/ac01-buggy-counter` 上对 `kimi-k3` / `dashscope.aliyuncs.com` 的一次非交互运行记入 `docs/acceptance-runbook.md`，作为 AC-01 真实 API 证据。JSONL 与凭据仍不入库。
+- 范围：该次完成探索、搜索、修改、验证通过、无 tool call 总结。第一次 `edit_file` 已把 `value + 2` 改为 `value + 1`，随后 `python verify.py` 直接成功，因此**不**把这次运行记为“根据失败结果修正”的证据；该条款继续以 scripted 套件为准。
+- 观察：`session-dir` 位于 workspace 内时，`search` 会命中 session JSONL 并导致终端超长输出。T13 演示应把 session 目录放到工作区外，而不是为此改公开搜索契约。
+- 后果：本条 supersede 同日 T12 决策中“真实 API skipped”的状态，不 supersede “不得用 fake 冒充真实网关”的规则。

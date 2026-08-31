@@ -1,13 +1,13 @@
 # CodingAgentNeo 任务分解
 
-> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T11、T14 已接受
+> 状态：已于 2026-08-30 通过用户变更审阅（新增 T14 前后端解耦）；T01～T12、T14 已接受
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 
 本文将需求拆分为可独立验收的纵向任务。任务卡中的命令是目标质量门；只有 T01 实际建立并验证后，才可称为标准命令。
 
 ## 协作规则
 
-- 开始任何任务前必须取得用户对当前执行范围的授权；T11 已接受，下一个依赖就绪任务为 T12。
+- 开始任何任务前必须取得用户对当前执行范围的授权；T12 已接受，下一个依赖就绪任务为 T13。
 - 编排器一次只选择一个依赖已完成且有证据的未勾选任务；每个任务 ID 必须使用一个全新的专用子 Agent，绝不复用到另一任务。
 - Worker 只修改当前任务范围，保留工作区既有和无关变更，不得替未完成依赖发明临时实现。
 - 公开接口、数据模型、状态机、安全或部署边界变化时，先更新 `ARCHITECTURE.md`、受影响卡片和必要的 `DECISIONS.md`。
@@ -247,7 +247,7 @@ flowchart TD
 
 ## 阶段 E：验收、说明与提交准备
 
-### [ ] T12 — 完成全基线验收与真实编程任务演练
+### [x] T12 — 完成全基线验收与真实编程任务演练
 
 **依赖:** T11  
 **范围:** 建立 AC-01～AC-14 的聚合验收套件、静态依赖审查、安全/异常场景和一个小型真实缺陷仓库演练；修复仅限已定义契约内缺陷，发现契约缺口先走变更控制。排除 Docker、子 Agent、Skill/MCP 具体实现和未列入首版的增强。
@@ -261,6 +261,8 @@ flowchart TD
 - 全量 lint、format-check、test、build 通过；任何不可用外部服务或平台验证明确保留为限制，不能以 mock 冒充。
 
 **验证:** `python -m ruff check .`; `python -m ruff format --check .`; `python -m pytest`; `python -m pytest tests/acceptance -m acceptance`; `python -m build`; 按 `docs/acceptance-runbook.md` 执行并保存脱敏结果。
+
+**完成摘要（2026-08-31）:** 已建立 AC-01～AC-14 聚合验收套件（`tests/acceptance/` + `acceptance` marker）、扩展静态依赖审查、`tests/fixtures/buggy_counter` 小型缺陷仓库，以及 `docs/acceptance-runbook.md`。AC-01 用 scripted fake model + `LocalExecutionEnvironment` 在 fixture 副本上完成探索、搜索、错误修改、验证失败后修正、无 tool call 总结，并注入非内置 fake Tool 证明 Loop 无来源分支；AC-02～AC-14 引用既有自动化证据而非整文件复制。同日用户手动以 `kimi-k3` / `dashscope.aliyuncs.com` 在 gitignored `temp/ac01-buggy-counter` 上完成真实网关演练：探索、搜索、修改、`python verify.py` 通过、无 tool call 总结；第一次编辑已正确，故未观察到“失败后修正”。凭据未入库。主 Agent 独立复验 Ruff lint/format-check 通过、全量 pytest **262 passed**、`pytest tests/acceptance -m acceptance` **50 passed**、`python -m build`、CLI help、workflow validator 与 `git diff --check` 均通过。未改公开 CLI/数据模型契约，未实现 Docker/子 Agent/Skill/MCP，未做 T13 交付物。
 
 ### [ ] T13 — 准备可审计的 README、演示与提交清单
 

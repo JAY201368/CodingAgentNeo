@@ -32,6 +32,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+norecursedirs = [".git", ".hg", ".svn", ".tox", ".venv", "venv", "dist", "build", "*.egg", "tests/fixtures"]
+markers = [
+    "acceptance: baseline AC-01 through AC-14 aggregate evidence",
+]
 
 [tool.ruff]
 target-version = "py312"
