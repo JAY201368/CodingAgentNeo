@@ -9,7 +9,10 @@ from coding_agent_neo.agent_loop import (
     TurnResult,
 )
 from coding_agent_neo.assembly import (
+    AgentBackendFactory,
     SessionResumeError,
+    build_agent_backend,
+    build_in_process_adapter,
     build_local_backend,
     build_system_prompt,
     recover_session_plan,
@@ -20,10 +23,10 @@ from coding_agent_neo.backend import (
     BackendClosedError,
     CloseSession,
     Interrupt,
-    LocalAgentBackend,
     SubmitTask,
     TurnInProgressError,
 )
+from coding_agent_neo.backend_service import AgentBackendService, LocalAgentBackend
 from coding_agent_neo.compactor import (
     COMPACTION_INSTRUCTION,
     CompactionError,
@@ -137,12 +140,15 @@ from coding_agent_neo.session import (
     SessionWriteError,
     read_session,
 )
+from coding_agent_neo.transports.in_process import InProcessAdapter
 
 __version__ = "0.1.0"
 
 __all__ = [
     "ActiveToolsMismatchError",
     "AgentBackend",
+    "AgentBackendFactory",
+    "AgentBackendService",
     "AgentId",
     "AgentLoop",
     "AgentLoopResult",
@@ -241,10 +247,13 @@ __all__ = [
     "SimpleContextBuilder",
     "IncompleteSessionTailError",
     "Interrupt",
+    "InProcessAdapter",
     "LocalAgentBackend",
     "SubmitTask",
     "TurnInProgressError",
     "build_local_backend",
+    "build_agent_backend",
+    "build_in_process_adapter",
     "build_system_prompt",
     "SubscriberDelivery",
     "ToolCall",

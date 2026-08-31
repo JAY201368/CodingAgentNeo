@@ -1,9 +1,10 @@
-"""Assemble an in-process ``AgentBackend`` from resolved configuration.
+"""Assemble the shared backend service and explicit in-process binding.
 
 The assembly layer is the only place that constructs the explicit system
 prompt and the backend object graph (Runtime, Environment, Store, Loop,
-Event Stream, Channel Approval Port). Frontends call
-``build_local_backend`` and must not hold those objects.
+Event Stream, Channel Approval Port).  ``build_agent_backend`` returns the
+shared service port; ``build_in_process_adapter`` wraps it in the thin Python
+binding used by the CLI.  Frontends must not hold the inner objects.
 
 Injectable timeouts (defaults are documented in ``backend.py``):
 
@@ -27,7 +28,7 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from coding_agent_neo.agent_loop import AgentLoop
@@ -36,10 +37,12 @@ from coding_agent_neo.backend import (
     DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
     DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
     AgentBackend,
+)
+from coding_agent_neo.backend_service import (
+    AgentBackendService,
     ApprovalChannel,
     ChannelApprovalPort,
     EventStreamBuffer,
-    LocalAgentBackend,
 )
 from coding_agent_neo.config import AppConfig, ConfigError
 from coding_agent_neo.context import (
@@ -64,12 +67,32 @@ from coding_agent_neo.session import (
     resolve_resume_path,
 )
 from coding_agent_neo.tools.registry import default_tool_registry
+from coding_agent_neo.transports.in_process import InProcessAdapter
 
 SYSTEM_PROMPT = """You are CodingAgentNeo, a local coding assistant. Work only on the user's task.
 Use native tool calls to inspect, edit, and validate the configured workspace. Prefer small,
 verifiable changes and report tests honestly. Structured file tools are workspace-bound. The bash
 tool starts in the workspace but is not an operating-system sandbox and inherits the launching
 user's permissions. Never reveal credentials or claim an unperformed action."""
+
+
+class AgentBackendFactory(Protocol):
+    """Composition seam shared by adapters that need a backend port."""
+
+    def __call__(
+        self,
+        config: AppConfig,
+        *,
+        interactive: bool,
+        resume: str | os.PathLike[str] | None = None,
+        model_client: Any | None = None,
+        environment: Any | None = None,
+        approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
+        event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
+        fsync: bool = True,
+    ) -> AgentBackend: ...
+
 
 _INVALID_PROVIDER_DIAGNOSTICS = frozenset(
     {
@@ -461,7 +484,7 @@ def _context_state_from_plan(plan: SessionResumePlan) -> ContextState:
     return state
 
 
-def build_local_backend(
+def build_agent_backend(
     config: AppConfig,
     *,
     interactive: bool,
@@ -472,8 +495,13 @@ def build_local_backend(
     worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
     event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
     fsync: bool = True,
-) -> AgentBackend:
-    """Build the in-process backend. Frontends must not keep the inner objects."""
+) -> AgentBackendService:
+    """Build the shared ``AgentBackendService`` from resolved configuration.
+
+    ``model_client``, ``environment``, timeout, and ``fsync`` parameters are
+    test/embedded seams.  Normal frontends should use
+    :func:`build_in_process_adapter` and leave them at their defaults.
+    """
 
     if not isinstance(interactive, bool):
         raise TypeError("interactive must be a boolean")
@@ -581,7 +609,7 @@ def build_local_backend(
         context_window=config.context_window,
         reserved_output_tokens=config.reserved_output_tokens,
     )
-    return LocalAgentBackend(
+    return AgentBackendService(
         loop,
         store,
         event_stream=stream,
@@ -593,10 +621,80 @@ def build_local_backend(
     )
 
 
+def build_in_process_adapter(
+    config: AppConfig,
+    *,
+    interactive: bool,
+    resume: str | os.PathLike[str] | None = None,
+    model_client: Any | None = None,
+    environment: Any | None = None,
+    approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
+    event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
+    fsync: bool = True,
+) -> InProcessAdapter:
+    """Build the CLI's explicit in-process adapter composition.
+
+    The shared backend factory is invoked first and the returned port is then
+    injected into a thin :class:`InProcessAdapter`.  Keeping this wrapper in
+    the composition root prevents CLI callers from depending on service
+    implementation objects.
+    """
+
+    backend = build_agent_backend(
+        config,
+        interactive=interactive,
+        resume=resume,
+        model_client=model_client,
+        environment=environment,
+        approval_timeout_seconds=approval_timeout_seconds,
+        worker_shutdown_timeout_seconds=worker_shutdown_timeout_seconds,
+        event_poll_timeout_seconds=event_poll_timeout_seconds,
+        fsync=fsync,
+    )
+    return InProcessAdapter(backend)
+
+
+def build_local_backend(
+    config: AppConfig,
+    *,
+    interactive: bool,
+    resume: str | os.PathLike[str] | None = None,
+    model_client: Any | None = None,
+    environment: Any | None = None,
+    approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
+    event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
+    fsync: bool = True,
+) -> AgentBackend:
+    """Compatibility facade for baseline callers.
+
+    This legacy name intentionally returns the same ``AgentBackendService``
+    produced by the shared factory; it does not maintain a second backend
+    implementation.  New CLI/composition callers should use
+    :func:`build_in_process_adapter` to make the binding explicit.
+    """
+
+    return build_agent_backend(
+        config,
+        interactive=interactive,
+        resume=resume,
+        model_client=model_client,
+        environment=environment,
+        approval_timeout_seconds=approval_timeout_seconds,
+        worker_shutdown_timeout_seconds=worker_shutdown_timeout_seconds,
+        event_poll_timeout_seconds=event_poll_timeout_seconds,
+        fsync=fsync,
+    )
+
+
 __all__ = [
+    "AgentBackendFactory",
     "SYSTEM_PROMPT",
     "SessionResumeError",
     "SessionResumePlan",
+    "build_agent_backend",
+    "build_in_process_adapter",
     "build_local_backend",
     "build_system_prompt",
     "recover_session_plan",

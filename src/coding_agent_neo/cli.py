@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from coding_agent_neo import __version__
-from coding_agent_neo.assembly import SessionResumeError, build_local_backend
+from coding_agent_neo.assembly import SessionResumeError, build_in_process_adapter
 from coding_agent_neo.backend import (
     AgentBackend,
     ApprovalResponse,
@@ -276,7 +276,7 @@ def run_cli(
     """Run after configuration and task-source validation have completed."""
 
     event_stream = output_stream if interactive else error_stream
-    factory = build_local_backend if backend_factory is None else backend_factory
+    factory = build_in_process_adapter if backend_factory is None else backend_factory
     backend = factory(config, interactive=interactive, resume=resume)
     renderer = TerminalRenderer(event_stream, output_limit=min(config.model_output_limit, 8_000))
     cursor = int(getattr(backend, "resume_last_sequence", 0) or 0)

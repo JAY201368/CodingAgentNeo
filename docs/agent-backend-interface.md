@@ -372,12 +372,12 @@ stateDiagram-v2
 | 主题 | 实现/证据 |
 | --- | --- |
 | 命令与 `AgentBackend` Port | 当前 `src/coding_agent_neo/backend.py`；T01 后保持在该模块 |
-| baseline 具体 Backend Service、worker、事件缓冲、授权通道 | 当前 `src/coding_agent_neo/backend.py`；T01 计划迁至 `src/coding_agent_neo/backend_service.py` |
-| In-process Python binding | T01 计划新建 `src/coding_agent_neo/transports/in_process.py` |
-| 后端组装与 resume | `src/coding_agent_neo/assembly.py` |
+| 共享 `AgentBackendService`、worker、事件缓冲、授权通道 | `src/coding_agent_neo/backend_service.py` |
+| In-process Python binding | `src/coding_agent_neo/transports/in_process.py` (`InProcessAdapter`) |
+| 后端组装与 resume | `src/coding_agent_neo/assembly.py` (`build_agent_backend`, `build_in_process_adapter`) |
 | EventEnvelope、事件名、状态枚举 | `src/coding_agent_neo/models.py` |
 | Store-first、脱敏与安全 JSON | `src/coding_agent_neo/events.py`, `src/coding_agent_neo/session.py` |
 | turn 生命周期和事件 payload | `src/coding_agent_neo/agent_loop.py` |
 | 工具/策略/结果事件 | `src/coding_agent_neo/executor.py` |
 | 当前 In-process 调用者 | `src/coding_agent_neo/cli.py`, `src/coding_agent_neo/renderer.py` |
-| 契约测试 | `tests/unit/test_backend.py`, `tests/integration/test_frontend_contract.py` |
+| 契约测试 | `tests/unit/test_backend.py`, `tests/unit/test_backend_service.py`, `tests/unit/test_in_process_transport.py`, `tests/transports/test_adapter_conformance.py`, `tests/integration/test_frontend_contract.py` |

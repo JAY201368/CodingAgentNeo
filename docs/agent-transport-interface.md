@@ -1,6 +1,6 @@
 # CodingAgentNeo Agent 适配层接口规范
 
-> 状态：后 baseline 增量规划，尚未实现
+> 状态：T01 In-process Python binding 已实现；HTTP/SSE binding 尚未实现
 > 规范版本：0.1-draft
 > 日期：2026-08-31
 > 后端依据：[agent-backend-interface.md](agent-backend-interface.md)
@@ -8,7 +8,7 @@
 
 本文定义 Agent 侧各适配层向对应前端公开的接口，使不同类型前端能够平等使用同一套后端语义。Adapter 实现者以 `agent-backend-interface.md` 为内部依据；前端不得越过 adapter 直接依赖该后端规范：CLI 参考本文第 3 节 In-process binding 与第 6 节共享规则，Web 与其他进程外前端参考第 4 节 HTTP/SSE binding 与第 6 节共享规则。
 
-本文不改变 baseline 完成态，也不声称当前仓库已经提供 HTTP 服务。
+本文不改变 baseline 完成态；当前仓库已提供 T01 的 In-process Python binding，仍不声称 HTTP/SSE 服务已经实现。
 
 ## 1. 端口与适配器
 

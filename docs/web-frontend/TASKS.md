@@ -32,7 +32,7 @@ flowchart TD
 
 ## 阶段 A：显式 Agent 端口与并列适配器
 
-### [ ] T01 — 拆分共享 Backend Service 与显式 In-process Adapter
+### [x] T01 — 拆分共享 Backend Service 与显式 In-process Adapter
 
 **依赖:** 无
 **范围:** 以 `docs/agent-backend-interface.md` 为内部权威，将 `backend.py` 收敛为公开 `AgentCommand`/`AgentBackend`/异常端口；把现有 EventStreamBuffer、ApprovalChannel/ChannelApprovalPort、单 worker 和 `LocalAgentBackend` 具体执行职责移动到 `src/coding_agent_neo/backend_service.py`，形成前端无关的 `AgentBackendService`。再按 `docs/agent-transport-interface.md` 第 3 节在 `transports/in_process.py` 新建薄 `InProcessAdapter`，只委托 port 并暴露 CLI 需要的可选 resume 元数据。组装层提供共享 backend factory 和 in-process composition factory，CLI 改用后者，并保留有测试的旧名称兼容 facade。排除 HTTP、Vue、核心 Loop/Policy/Environment 行为变化和无关重构。
@@ -48,6 +48,8 @@ flowchart TD
 - CLI 及其文档只依赖 In-process Adapter binding；不要求 CLI 把 Agent 后端规范当作直接接入 API。
 
 **验证:** `.venv/bin/python -m pytest tests/unit/test_backend.py tests/unit/test_backend_service.py tests/unit/test_in_process_transport.py tests/integration/test_frontend_contract.py tests/integration/test_cli.py tests/integration/test_resume_cli.py`; `.venv/bin/python -m pytest`; `.venv/bin/python -m ruff check .`; `.venv/bin/python -m ruff format --check .`; `.venv/bin/python -m build`; `.venv/bin/python -m coding_agent_neo --help`; 静态依赖扫描与 `git diff --check`。
+
+**完成摘要（2026-09-01）:** `backend.py` 已收敛为 command/Port/异常，`AgentBackendService` 独立拥有 worker、事件缓冲与授权通道，CLI 通过薄 `InProcessAdapter` 接入；旧 `LocalAgentBackend`/`build_local_backend` 仅保留为无分叉兼容 facade。主 Agent 复核结果：包含 shared conformance 的定向测试 44 passed、全量测试 268 passed；Ruff lint/format、Python build、CLI `--help`、workflow validator、静态依赖扫描及 `git diff --check` 均通过。HTTP/SSE 与 Vue 未在本卡实现。
 
 ### [ ] T02 — 交付前端无关的 Agent HTTP/SSE Adapter
 

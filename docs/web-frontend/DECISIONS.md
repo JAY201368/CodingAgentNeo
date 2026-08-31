@@ -57,3 +57,9 @@
 - 理由与替代：旧 0.2 模型同时把两种 adapter 称为并列，又让 HTTP factory 创建 `InProcessAgentBackend`，并把两种访问方式都需要的执行运行时归入 In-process，导致概念和依赖方向冲突。仅把具体 service 改名为 In-process Adapter 不能解决该问题。
 - 后果：T01 现同时交付纯 Port、共享 Backend Service 和薄 In-process Adapter；T02 只注入共享 backend factory。兼容 `LocalAgentBackend`/`build_local_backend` 只是 facade，不得成为 HTTP 依赖。本条 supersede 先前“worker/事件缓冲/授权通道归 In-process Adapter”和“HTTP 创建 In-process backend”的描述。
 - 任务映射更正：Vue 工程基础为 T03，浏览器 HTTP client 为 T04，刷新重连为 T07，视觉与可访问性为 T08。本映射 supersede 日志中残留的 T01、T03/T06 和 T07 旧编号。
+
+## 2026-09-01 — T01 以懒兼容别名保持 baseline 导入
+
+- 选择：`backend.py` 只定义 command/port/exception；旧 `LocalAgentBackend`、`EventStreamBuffer` 和 approval helper 名称通过懒兼容别名解析到 `backend_service.py`，旧 `build_local_backend` 则直接委托共享 `build_agent_backend`。CLI 默认只使用 `build_in_process_adapter`。
+- 理由与替代：直接从 Port 模块导入具体 service 会重新建立实现依赖；删除旧名称会破坏 baseline 测试和受控嵌入调用。单一 service 实现加懒别名同时保留导入兼容和静态边界。
+- 后果：新 adapter/HTTP 实现应依赖 `AgentBackend` Port 或共享 factory，不应依赖兼容名称；旧调用者仍观察到原有 worker、resume、approval 和 close 行为。

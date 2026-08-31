@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端 Agent 工作协议
 
-`requirement.md` 控制增量目标；`ARCHITECTURE.md` 控制边界；`../agent-backend-interface.md` 控制 adapter 面向的 Agent 后端端口；`../agent-transport-interface.md` 控制前端接入 binding；`TASKS.md` 控制任务范围和依赖。当前仅完成 Change control 规划，尚无增量实现任务被接受。
+`requirement.md` 控制增量目标；`ARCHITECTURE.md` 控制边界；`../agent-backend-interface.md` 控制 adapter 面向的 Agent 后端端口；`../agent-transport-interface.md` 控制前端接入 binding；`TASKS.md` 控制任务范围和依赖。T01 已交付共享 Backend Service 与 In-process binding；后续任务仍按 DAG 串行执行。
 
 ## 1. 开始工作前
 
