@@ -128,7 +128,7 @@ flowchart LR
 - 前端与后端之间只有两条通道：`AgentBackend.send(command)` 与 `AgentBackend.events(since=...)`。后端不持有任何前端提供的可调用对象。
 - `SubmitTask` 只在没有 turn 在执行时被接受；turn 执行期间提交新任务是错误而不是排队，首版不提供运行中 steering 或后台输入队列。
 - `ApprovalResponse` 与 `Interrupt` 在 turn 执行期间也必须被立即接受：前者交给挂起的 approval 通道，后者设置 Runtime cancellation。两者都不进入 worker 队列。
-- `ApprovalResponse.request_id` 必须与当前挂起请求一致，否则被丢弃，避免前端串号误批。
+- `ApprovalResponse.request_id` 必须与当前挂起请求一致；不匹配时当前挂起请求按 fail-closed 拒绝，避免前端串号误批。
 - 事件流按 Store 分配的 sequence 排序且不重复。前端只需记住最后一个 sequence 即可断线续订；进程内回放来自 Event Stream 缓冲，跨进程回放来自 JSONL Session Store。
 - 拉取模型天然隔离慢消费者：前端渲染慢只会让自身落后，不阻塞 Loop、Executor 或持久化。
 
@@ -225,6 +225,8 @@ Tool 至少公开 `name`、`description`、JSON-compatible schema、参数校验
 Turn/运行状态为 `RUNNING`、`WAITING_FOR_APPROVAL`、`COMPLETED_TURN`、`LIMIT_REACHED`、`INTERRUPTED`、`FAILED`。协议错误对模型可见并计数；Environment/Tool 普通失败转 ToolResult；只有不可恢复系统错误结束 Loop，同时尽力记录 `error` 和结束事件。
 
 ### 6.6 前端与 Agent 后端契约
+
+面向替换前端的完整命令、事件 payload、状态机、游标、授权和兼容性规范见 [前后端交互接口规范](../frontend-backend-interface.md)。本节保留架构级摘要；两处不一致时应先依据实现与契约测试修正规范和本架构，不得由前端自行选择一种解释。
 
 `AgentBackend` 是前端可见的唯一后端接口，任何前端实现（首版 CLI，未来 Web GUI）都只依赖它：
 

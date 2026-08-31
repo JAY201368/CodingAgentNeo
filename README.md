@@ -35,3 +35,5 @@ coding-agent-neo                       # interactive task and follow-up prompts
 In one-shot mode, the final assistant text is written to stdout while event/status diagnostics are written to stderr. Interactive prompts and events use stdout. Exit codes are: `0` completed, `1` startup/runtime `FAILED`, `2` command usage or configuration failure, `3` `LIMIT_REACHED`, and `130` `INTERRUPTED`. A session JSONL file is created below `session_dir` once execution begins.
 
 With non-interactive `ask`, bash is immediately denied and stdin is never consumed for approval; choose `--approval-mode auto` or `--yolo` for explicitly unattended bash execution. Never put a key value in source, arguments, tracked configuration, or session files. `--resume <session_id>` (or a JSONL path) continues a linear session without replaying historical tool side effects.
+
+Frontend implementers should use the versioned [frontend/backend interface specification](docs/frontend-backend-interface.md) as the command, event, cursor, approval, and lifecycle contract. The baseline backend is an in-process Python interface; it does not provide HTTP or WebSocket transport.
