@@ -51,7 +51,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** `backend.py` 已收敛为 command/Port/异常，`AgentBackendService` 独立拥有 worker、事件缓冲与授权通道，CLI 通过薄 `InProcessAdapter` 接入；旧 `LocalAgentBackend`/`build_local_backend` 仅保留为无分叉兼容 facade。主 Agent 复核结果：包含 shared conformance 的定向测试 44 passed、全量测试 268 passed；Ruff lint/format、Python build、CLI `--help`、workflow validator、静态依赖扫描及 `git diff --check` 均通过。HTTP/SSE 与 Vue 未在本卡实现。
 
-### [ ] T02 — 交付前端无关的 Agent HTTP/SSE Adapter
+### [x] T02 — 交付前端无关的 Agent HTTP/SSE Adapter
 
 **依赖:** T01
 **范围:** 以 `docs/agent-backend-interface.md` 为内部映射依据，在 `src/coding_agent_neo/transports/http/` 实现 `docs/agent-transport-interface.md` 第 4 节的 ASGI app、wire DTO、command decoder、SSE、单 session registry、错误/Host/Origin 映射和有序关闭；通过注入的共享 `AgentBackendFactory` 只取得 `AgentBackend` Port，由 composition root 默认组装 `AgentBackendService`，并提供只服务 Agent API 的 `coding-agent-neo-http` 入口。排除对具体 Backend Service 和 In-process Adapter 的任何依赖，以及 Vue、Vite、`web/dist`、静态资源托管、远程监听、认证、多 session 和 Core 行为变化。
@@ -67,6 +67,8 @@ flowchart TD
 - HTTP 客户端文档和 schema 只暴露 Adapter binding，不要求任何前端阅读、import 或理解 Agent 后端端口。
 
 **验证:** `.venv/bin/python -m pip install -e ".[dev,http]"`; `.venv/bin/python -m pytest tests/transports/test_http_transport.py tests/transports/test_adapter_conformance.py`; `.venv/bin/python -m pytest`; `.venv/bin/python -m ruff check .`; `.venv/bin/python -m ruff format --check .`; `.venv/bin/python -m build`; `.venv/bin/coding-agent-neo-http --help`; 静态依赖/secret 扫描与 `git diff --check`。
+
+**完成摘要（2026-09-01）:** 已交付仅面向 `AgentBackend` Port/注入 factory 的 `/api/v1` HTTP/SSE adapter、wire/command decoder、单 session registry、Host/Origin 与安全错误映射，以及固定回环监听的 `coding-agent-neo-http` composition root；HTTP 包不依赖 Backend Service、In-process Adapter 或任何 Web 静态资源。session-owned event pump 从 cursor 0 保留 canonical 历史，每个 SSE subscriber 独立过滤并可取消，验证了断线不改变 Agent、重连不累积连接线程及高游标后低游标仍可完整补回。主 Agent 复核结果：可选依赖安装成功，定向 HTTP/shared conformance 14 passed、全量测试 280 passed；Ruff lint/format、Python build、HTTP CLI `--help`、workflow validator、依赖/secret/包内容扫描及 `git diff --check` 均通过；仅有第三方 Starlette TestClient 弃用警告。真实模型、真实浏览器及公网/局域网部署未执行。
 
 ## 阶段 B：独立 Web Client 基础
 

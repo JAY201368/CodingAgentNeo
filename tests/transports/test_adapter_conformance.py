@@ -10,9 +10,7 @@ from coding_agent_neo.backend import BackendClosedError, CloseSession, SubmitTas
 from coding_agent_neo.models import EventType, RuntimeState
 
 
-def test_service_and_in_process_binding_share_turn_cursor_and_close_semantics(
-    backend_binding, tmp_path: Path
-) -> None:
+def test_adapters_share_turn_cursor_and_close_semantics(backend_binding, tmp_path: Path) -> None:
     backend = backend_binding
     backend.send(SubmitTask("same scenario"))
     events = wait_session(tmp_path, lambda event: event.type == EventType.TURN_END)

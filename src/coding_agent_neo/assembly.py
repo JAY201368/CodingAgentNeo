@@ -28,7 +28,7 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 from uuid import uuid4
 
 from coding_agent_neo.agent_loop import AgentLoop
@@ -38,6 +38,7 @@ from coding_agent_neo.backend import (
     DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
     AgentBackend,
 )
+from coding_agent_neo.backend_factory import AgentBackendFactory
 from coding_agent_neo.backend_service import (
     AgentBackendService,
     ApprovalChannel,
@@ -74,24 +75,6 @@ Use native tool calls to inspect, edit, and validate the configured workspace. P
 verifiable changes and report tests honestly. Structured file tools are workspace-bound. The bash
 tool starts in the workspace but is not an operating-system sandbox and inherits the launching
 user's permissions. Never reveal credentials or claim an unperformed action."""
-
-
-class AgentBackendFactory(Protocol):
-    """Composition seam shared by adapters that need a backend port."""
-
-    def __call__(
-        self,
-        config: AppConfig,
-        *,
-        interactive: bool,
-        resume: str | os.PathLike[str] | None = None,
-        model_client: Any | None = None,
-        environment: Any | None = None,
-        approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
-        worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
-        event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
-        fsync: bool = True,
-    ) -> AgentBackend: ...
 
 
 _INVALID_PROVIDER_DIAGNOSTICS = frozenset(

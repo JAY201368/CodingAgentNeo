@@ -1,6 +1,6 @@
 # CodingAgentNeo Agent 适配层接口规范
 
-> 状态：T01 In-process Python binding 已实现；HTTP/SSE binding 尚未实现
+> 状态：T01 In-process Python binding 与 T02 HTTP/SSE binding 已实现
 > 规范版本：0.1-draft
 > 日期：2026-08-31
 > 后端依据：[agent-backend-interface.md](agent-backend-interface.md)
@@ -8,7 +8,8 @@
 
 本文定义 Agent 侧各适配层向对应前端公开的接口，使不同类型前端能够平等使用同一套后端语义。Adapter 实现者以 `agent-backend-interface.md` 为内部依据；前端不得越过 adapter 直接依赖该后端规范：CLI 参考本文第 3 节 In-process binding 与第 6 节共享规则，Web 与其他进程外前端参考第 4 节 HTTP/SSE binding 与第 6 节共享规则。
 
-本文不改变 baseline 完成态；当前仓库已提供 T01 的 In-process Python binding，仍不声称 HTTP/SSE 服务已经实现。
+本文不改变 baseline 完成态；当前仓库已提供 T01 的 In-process Python binding 和 T02 的
+HTTP/SSE 服务。Web 客户端仍只消费本文件第 4 节 binding，不直接依赖 Python 端口。
 
 ## 1. 端口与适配器
 
@@ -182,3 +183,13 @@ HTTP 测试可使用 fake backend 证明适配映射；只有对真实 `AgentBac
 - 删除/重命名命令或字段、改变游标比较、approval 关联、状态含义或结束边界，需要先改变语义规范并提升相应版本。
 - 新增 transport 不得修改 Agent Loop、Tool、Policy、Environment 或 Session Store 来迁就某个前端。
 - 静态资源托管属于 Web 产品组合，不属于 Agent HTTP adapter。任何 Vue/Vite 依赖进入 `transports/http/` 都视为边界违规。
+
+## 7. 当前实现索引
+
+| 主题 | 实现 |
+| --- | --- |
+| In-process Python binding | `src/coding_agent_neo/transports/in_process.py` (`InProcessAdapter`) |
+| Shared backend factory seam | `src/coding_agent_neo/backend_factory.py` (`AgentBackendFactory`) |
+| HTTP/SSE wire DTO、command decoder、ASGI app、session 生命周期 | `src/coding_agent_neo/transports/http/` |
+| HTTP composition root | `src/coding_agent_neo/http_cli.py` (`coding-agent-neo-http`) |
+| HTTP 客户端 binding 说明 | `docs/agent-http-client.md` |

@@ -63,3 +63,9 @@
 - 选择：`backend.py` 只定义 command/port/exception；旧 `LocalAgentBackend`、`EventStreamBuffer` 和 approval helper 名称通过懒兼容别名解析到 `backend_service.py`，旧 `build_local_backend` 则直接委托共享 `build_agent_backend`。CLI 默认只使用 `build_in_process_adapter`。
 - 理由与替代：直接从 Port 模块导入具体 service 会重新建立实现依赖；删除旧名称会破坏 baseline 测试和受控嵌入调用。单一 service 实现加懒别名同时保留导入兼容和静态边界。
 - 后果：新 adapter/HTTP 实现应依赖 `AgentBackend` Port 或共享 factory，不应依赖兼容名称；旧调用者仍观察到原有 worker、resume、approval 和 close 行为。
+
+## 2026-09-01 — T02 的 SSE 订阅复用 session-owned event pump
+
+- 选择：每个 transport session 只建立一个从 canonical cursor `0` 读取 `AgentBackend.events()` 的事件 pump，并缓存该 session 的 canonical envelopes；每个 SSE 连接只注册可取消 subscriber，以自己的 cursor 过滤缓存和后续事件。
+- 理由与替代：若每个连接各自用线程阻塞读取 backend iterator，浏览器断开时无法从另一线程可靠关闭正在执行的 Python generator，反复重连会遗留 feeder；若 pump 从首个 subscriber cursor 开始，又会让后续更低 cursor 的合法重连丢失历史。session-owned pump 同时保持断线无 Agent 副作用和 `sequence > cursor` 补回语义。
+- 后果：SSE 断开只移除 subscriber，不发送 approval/interrupt/close，也不停止 Agent；event pump 与 transport session 同寿命并在显式 DELETE/服务关闭时清理。HTTP adapter 会持有一份 session 级 envelope 缓存，后续若改变事件保留策略，必须继续满足任意合法 cursor 的重订阅契约。

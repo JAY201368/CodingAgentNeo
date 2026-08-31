@@ -36,4 +36,16 @@ In one-shot mode, the final assistant text is written to stdout while event/stat
 
 With non-interactive `ask`, bash is immediately denied and stdin is never consumed for approval; choose `--approval-mode auto` or `--yolo` for explicitly unattended bash execution. Never put a key value in source, arguments, tracked configuration, or session files. `--resume <session_id>` (or a JSONL path) continues a linear session without replaying historical tool side effects.
 
-Adapter implementers use the versioned [Agent backend interface specification](docs/agent-backend-interface.md) as the internal command, event, cursor, approval, and lifecycle authority. Frontends use only their corresponding binding in the [Agent adapter interface specification](docs/agent-transport-interface.md). The CLI obtains the explicit `InProcessAdapter` through `build_in_process_adapter`; the shared runtime is `AgentBackendService` from `build_agent_backend`. The planned HTTP/SSE binding is not implemented yet.
+Adapter implementers use the versioned [Agent backend interface specification](docs/agent-backend-interface.md) as the internal command, event, cursor, approval, and lifecycle authority. Frontends use only their corresponding binding in the [Agent adapter interface specification](docs/agent-transport-interface.md). The CLI obtains the explicit `InProcessAdapter` through `build_in_process_adapter`; the shared runtime is `AgentBackendService` from `build_agent_backend`.
+
+The optional, frontend-independent Agent HTTP/SSE binding is available with:
+
+```bash
+python -m pip install -e ".[dev,http]"
+coding-agent-neo-http --config .coding-agent-neo.toml
+```
+
+It exposes only `/api/v1` on `127.0.0.1` (default port `8765`) and does not serve Vue/Vite
+static resources. See the [Agent HTTP/SSE client binding](docs/agent-http-client.md) for the
+wire, SSE cursor, command, error, and lifecycle contract. The API key remains in the Agent
+process environment and is never a command-line value or HTTP field.

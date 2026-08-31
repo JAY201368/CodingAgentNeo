@@ -2,22 +2,24 @@
 
 ## Completed
 
-- T01 — 已交付共享 `AgentBackendService` 与显式 `InProcessAdapter`：`backend.py` 收敛为命令/Port/异常，worker、事件缓冲、授权通道和具体执行职责位于 `backend_service.py`；组装层提供 `build_agent_backend`/`build_in_process_adapter`，CLI 默认经 In-process binding 接入；旧 `LocalAgentBackend`/`build_local_backend` 保留为无分叉兼容 facade。主 Agent 验收证据为定向测试 44 passed、全量测试 268 passed，Ruff lint/format、build、CLI help、workflow validator、静态依赖扫描与 diff check 均通过；HTTP/SSE、Vue 和 T02 仍未实现。
+- T01 — 已交付共享 `AgentBackendService` 与显式 `InProcessAdapter`：`backend.py` 收敛为命令/Port/异常，worker、事件缓冲、授权通道和具体执行职责位于 `backend_service.py`；组装层提供 `build_agent_backend`/`build_in_process_adapter`，CLI 默认经 In-process binding 接入；旧 `LocalAgentBackend`/`build_local_backend` 保留为无分叉兼容 facade。主 Agent 验收证据为定向测试 44 passed、全量测试 268 passed，Ruff lint/format、build、CLI help、workflow validator、静态依赖扫描与 diff check 均通过；在 T01 完成时 HTTP/SSE、Vue 和 T02 尚未实现。
+- T02 — 已实现前端无关的 `/api/v1` HTTP/SSE ASGI adapter、wire DTO/command decoder、单活跃 session registry、SSE `since`/`Last-Event-ID`/keepalive、Host/Origin 回环校验、错误/关闭映射和独立 `coding-agent-neo-http` composition root。HTTP 包只面对 `AgentBackend` Port 与注入 factory；真实共享 `build_agent_backend` 注入测试证明路径不经过 In-process Adapter。session-owned event pump 从 cursor 0 缓存 canonical 历史，各 SSE subscriber 可独立取消与按 cursor 补回，不累积连接线程。主 Agent 验收证据为定向 HTTP/shared conformance 14 passed、全量 pytest 280 passed，Ruff lint/format、Python build、HTTP CLI help、workflow validator、依赖/secret/包内容扫描与 diff check 均通过；仅有第三方 TestClient 弃用警告，fake 与 scripted service 证据不代表真实模型或公网部署。
 
 ## Current State
 
 - 2026-08-31 已完成 Bootstrap 及两轮 Change control：`docs/agent-backend-interface.md` 定义 Port 与共享 Backend Service 语义；`docs/agent-transport-interface.md` 独立定义并列 In-process/HTTP binding。前端只参考对应 binding 与共享 adapter 规则。
-- 既有 Python Agent 后端与 CLI 基线保持不变；仓库尚无 `web/`、HTTP/SSE 传输适配层或 Web 产品代码，不能声称 Web 前端可运行。
-- 当前增量已完成 T01；后续 T02 HTTP/SSE、T03 Web 工程及更后续任务未开始，不得提前声称可用。
+- 既有 Python Agent 后端与 CLI 基线保持不变；HTTP/SSE Agent binding 已可独立运行，仓库仍无 `web/` 或 Web 产品代码，不能声称 Web 前端可运行。
+- 当前增量已完成 T01/T02；T03 Web 工程及更后续任务未开始，不得提前声称 Web 客户端或静态组合入口可用。
 
 ## Known Issues
 
 - FastAPI + SSE、Vue TypeScript/npm、仅回环部署和金色 Web token 仍是可逆技术选择；用户已明确确认 adapter 所有权和显式 In-process 拆分方向。
 - 南京大学官方规范明确的是标准紫 CMYK 值；架构中的紫色 HEX 是屏幕近似换算，金色 HEX 是产品视觉 token，不声称为校方发布的官方数字色值。
 - `backend.py` 的旧实现名称仅通过懒兼容别名保留；共享实现和执行职责已在 `backend_service.py`，CLI 使用 `transports/in_process.py` 的薄 binding。
-- 浏览器到 Agent 之间仍无网络适配；新增 wire 规范是规划契约，不是 HTTP 已实现证据。
+- HTTP binding 已交付；浏览器客户端、Vite 开发代理与静态资源组合仍未实现，属于 T03 及后续任务。
+- 测试使用 fake backend 与 scripted model；live conformance 仅验证本地 uvicorn/HTTP wiring，未执行真实模型网关、真实浏览器或公网/局域网部署验证。
 - 首版规划不支持服务器重启后的 Web session resume；只支持对仍存活本地进程的刷新重连。
 
 ## Next Recommended Task
 
-- T02 — 交付前端无关的 Agent HTTP/SSE Adapter；本轮未实现 HTTP、Vue 或 Web composition launcher。
+- T03 — 建立独立 Vite + Vue Web 工程；本轮不实现或声称该任务。
