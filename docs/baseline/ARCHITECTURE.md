@@ -226,7 +226,7 @@ Turn/运行状态为 `RUNNING`、`WAITING_FOR_APPROVAL`、`COMPLETED_TURN`、`LI
 
 ### 6.6 前端与 Agent 后端契约
 
-面向替换前端的完整命令、事件 payload、状态机、游标、授权和兼容性规范见 [前后端交互接口规范](../frontend-backend-interface.md)。本节保留架构级摘要；两处不一致时应先依据实现与契约测试修正规范和本架构，不得由前端自行选择一种解释。
+baseline 建立的完整命令、事件 payload、状态机、游标、授权和兼容性语义，现由重命名后的 [Agent 后端接口规范](../agent-backend-interface.md) 保存。本节保留 baseline 架构摘要；后续 adapter 的前端接入方式另见 [Agent 适配层接口规范](../agent-transport-interface.md)。
 
 `AgentBackend` 是前端可见的唯一后端接口，任何前端实现（首版 CLI，未来 Web GUI）都只依赖它：
 
