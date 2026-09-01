@@ -1,22 +1,23 @@
 # CodingAgentNeo Agent 后端接口规范
 
-> 规范版本：1.1
-> 事件 schema：1
-> 基线日期：2026-08-31
+> 规范版本：1.2
+> 事件 schema：1；历史 DTO schema：1
+> 基线日期：2026-09-01
 > 适用范围：AgentBackend 应用端口及其规范语义
 > 规范来源：`backend.py`、`models.py`、`agent_loop.py`、`executor.py`、`assembly.py` 与 adapter 契约测试
 
-本文定义 Agent 后端提供给适配层的应用端口，是共享 Backend Service 实现和 In-process、HTTP/SSE 及未来适配器共同遵守的内部权威规范。它不规定任何前端如何直接接入；CLI、Web 或其他前端只应参考自己所使用的适配层接口规范。
+本文定义 Agent 后端提供给适配层的应用端口，是共享 Backend Service 实现和 In-process、HTTP/SSE 及未来适配器共同遵守的内部权威规范。它不规定任何前端如何直接接入；CLI、Web 或其他前端只应参考自己所使用的适配层接口规范。本文新增的 workspace history provider、DTO 和异常是 T01 先行版本化的契约；后续实现任务必须遵守它们，本文不把尚未实现的能力写成当前产品行为。
 
 文中的“必须”“不得”“应当”是规范性要求；示例只说明结构，不保证 ID、时间戳或具体文案固定。适配层不得通过翻译、缓存或传输机制改变本文的命令、事件、游标、状态、授权和生命周期语义。
 
-baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。后续增量会先把其中的共享 Backend Service/Runtime 与端口定义分离，再在该端口之上提供并列的 In-process 和 HTTP/SSE Adapter。两种 adapter 都依赖 `AgentBackend` Port，互不依赖。
+baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。后续增量先把其中的共享 Backend Service/Runtime 与端口定义分离，再在该端口之上提供并列的 In-process 和 HTTP/SSE Adapter。两种 adapter 都通过同一个 workspace-scoped `AgentBackendProvider` 取得历史能力和 per-session `AgentBackend`，互不依赖。T01 只冻结契约，不声称 provider、历史读取或 HTTP history route 已经实现。
 
 > [Agent 适配层接口规范](agent-transport-interface.md) 是前端接入的唯一权威文档。前端只参考其中对应的 In-process 或 HTTP/SSE binding，不需要阅读本文；只有 Backend Service 与 adapter 实现者需要本文定义的内部 Port 语义。
 
 ## 1. 后端端口边界与职责
 
-任何适配层只能通过 AgentBackend Port：
+适配层通过 workspace-scoped `AgentBackendProvider` 取得 history page 或创建 session；创建后的
+per-session live binding 只能通过 `AgentBackend` Port：
 
 - 用 `send(command)` 发送命令；
 - 用 `events(since=sequence)` 拉取事件；
@@ -26,6 +27,156 @@ baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。�
 适配层负责把特定调用方式映射到上述端口，并保持命令、事件、错误和生命周期语义。适配层不得持有或直接调用 `AgentLoop`、`AgentRuntime`、`SessionStore`、`ExecutionEnvironment`、`ModelClient`、`ToolRegistry`，也不得复制工具策略、路径安全、Agent 决策或持久化逻辑。
 
 Agent 后端负责 turn 串行化、模型和工具执行、策略判断、授权等待、取消、事件持久化和状态推导。具体 Backend Service/Runtime 可以内部拥有 worker、事件缓冲和授权通道，但它不得读取终端/HTTP 输入、写终端/HTTP 输出或回调具体前端对象。
+
+### 1.1 Workspace-scoped `AgentBackendProvider`
+
+`AgentBackendProvider` 是适配层唯一的后端应用依赖。它在 composition root 以一个已经解析、校验的 workspace 创建，并把该 workspace 的历史仓库与 session assembly 封装在同一个对象内。适配层不得同时注入一个 provider 加一个 `SessionStore`、repository、factory 或 workspace path，也不得通过 provider 以外的对象发现历史。
+
+```python
+class AgentBackendProvider(Protocol):
+    def list_sessions(
+        self, *, cursor: str | None = None, limit: int = 50
+    ) -> SessionHistoryPage: ...
+
+    def read_session_events(
+        self, session_id: str, *, since: int = 0, limit: int = 200
+    ) -> SessionEventPage: ...
+
+    def create_session(self, *, resume_session_id: str | None = None) -> AgentBackend: ...
+```
+
+这里的 `session_id` 是不透明字符串，不是 `PathLike`；`resume_session_id=None` 表示创建新 session。provider 内部可以持有已解析 workspace 和固定 repository，但这些值不是 public DTO、异常、日志或 adapter 入参。`create_session()` 返回的对象仍然只是一个 per-session `AgentBackend`；它的 `send/events/last_state/close` 语义不因 provider 存在而改变。
+
+provider 的生命周期和并发边界如下：
+
+- 一个 provider 只服务一个 resolved workspace；它不得接收或切换第二个 workspace。
+- `list_sessions()` 和 `read_session_events()` 是有限、同步返回的快照；它们不启动 Agent、不发送命令、不产生 SSE，也不执行任何工具或 shell 副作用。
+- `create_session()` 对新 session 生成新的线性 session/root Agent identity；对 resume 重新校验文件并返回同一线性 session 的 backend。HTTP adapter 的单 active transport session 规则另由 transport registry 强制，不能通过重复调用绕过。
+- resume 不是 listing 的授权缓存：创建时必须再次验证 ID、固定路径、regular-file 条件、JSONL schema、root Agent、context 和 budget。历史文件在 listing 后消失、改变或变得不可恢复时，创建必须安全失败。
+
+### 1.2 History DTO schema v1
+
+DTO 使用不可变、带类型标注的 dataclass/Protocol 表示，并且其 `to_dict()` 结果必须是下列 JSON-compatible 结构。除明确标为可选的字段外，字段不得省略；DTO 不包含路径、文件名、workspace、原始 JSONL 或未经投影的 provider response。
+
+#### Bounded text and diagnostics
+
+历史首条用户消息使用固定的 `BoundedText` 投影，最多保留 4,096 个 UTF-8 字节。`text` 按 Unicode 字符边界截取；`original_length` 和 `limit` 是字节数。即使没有截断也保留所有字段，以免消费者依赖隐含规则。
+
+```json
+{
+  "text": "请检查失败测试",
+  "truncated": false,
+  "original_length": 21,
+  "limit": 4096,
+  "encoding": "utf-8"
+}
+```
+
+`HistoryDiagnostic` 只允许稳定 `code` 和固定、安全 `message` 两个字符串字段：
+
+```json
+{"code":"incomplete_tail","message":"history has an incomplete final record"}
+```
+
+实现可以为一个 candidate 收集多个诊断，但每个 `diagnostics` 数组最多 8 项；诊断不得包含路径、行内容、字节内容、用户文字、workspace、traceback、配置、凭据或 provider 返回体。常见 code 包括 `incomplete_tail`、`invalid_record`、`unsupported_schema`、`missing_root_agent`、`missing_first_user_message`、`unreadable_candidate` 和 `not_resumable`；新增 code 必须保持安全降级。
+
+#### `SessionHistoryItem`
+
+```json
+{
+  "session_id": "session_0123456789abcdef0123456789abcdef",
+  "first_user_message": {
+    "text": "请检查失败测试",
+    "truncated": false,
+    "original_length": 21,
+    "limit": 4096,
+    "encoding": "utf-8"
+  },
+  "created_at": "2026-09-01T08:00:00.000000Z",
+  "updated_at": "2026-09-01T08:01:00.000000Z",
+  "last_sequence": 7,
+  "last_state": "COMPLETED_TURN",
+  "resumable": true,
+  "diagnostics": []
+}
+```
+
+字段约束：
+
+| 字段 | 类型与语义 |
+| --- | --- |
+| `session_id` | canonical opaque session ID；只返回安全 ID，不返回其路径。 |
+| `first_user_message` | `BoundedText` 或 `null`。它是第一个 canonical root-Agent `user_message.payload.text`；缺失/非法时为 `null` 并给出安全诊断。 |
+| `created_at` | 第一个有效 canonical envelope 的 UTC ISO 8601 `Z` 时间戳；无法确定时为 `null`。 |
+| `updated_at` | 最后一个有效 canonical envelope 的 UTC ISO 8601 `Z` 时间戳；无法确定时为 `null`。 |
+| `last_sequence` | 非负 JSON integer；没有有效事件时为 `0`。 |
+| `last_state` | `RuntimeState` 字符串，无法安全投影时为 `null`。 |
+| `resumable` | 只有当前文件通过 provider 的 resume 校验才为 `true`；listing 的历史结果不构成后续授权。 |
+| `diagnostics` | 最多 8 个 `HistoryDiagnostic`；不使健康 candidate 的 listing 失败。 |
+
+首条消息必须来自 root Agent，不能把任意 agent、assistant 文本、工具参数、摘要或文件名当作首条用户消息。文本截断只改变 projection，不改变 canonical JSONL。
+
+#### Pages
+
+`SessionHistoryPage` 的 JSON 结构固定为：
+
+```json
+{
+  "sessions": [],
+  "next_cursor": null
+}
+```
+
+`next_cursor` 没有下一页时为 `null`，否则是不超过 256 个 ASCII 字符的不透明 token。列表默认 `limit=50`，允许范围为 `1..100`；超界、非整数或 boolean 必须抛出 `InvalidSessionHistoryLimitError`。cursor 缺省/`null` 表示第一页；客户端必须原样回送 provider 返回的 token，不得解码、拼接路径、将它当作 offset 或 session ID。空字符串、非 ASCII、超过 256 字符、过期或无法验证的 token 必须抛出 `InvalidSessionHistoryCursorError`。
+
+列表按 `(updated_at, session_id)` 确定性 newest-first 排序，两个字段均按降序比较；`updated_at=null` 的 item 排在有效时间之后，再以 `session_id` 降序打破平局。cursor 表示上一次快照中最后一项之后的位置。目录追加或并发写入可以使 page 元数据变旧，但不得改变同一响应内的排序；客户端可使用原 cursor 再请求。
+
+`SessionEventPage` 的 JSON 结构固定为：
+
+```json
+{
+  "session_id": "session_0123456789abcdef0123456789abcdef",
+  "events": [],
+  "next_cursor": null,
+  "has_more": false,
+  "diagnostics": []
+}
+```
+
+历史事件按 canonical `sequence` 升序返回，只返回 `sequence > since` 的事件，最多 `limit` 项。`since` 默认 `0`，必须是非负且不超过 `2**63 - 1` 的 JSON integer，不能是 boolean；`limit` 默认 `200`，允许范围为 `1..200`。`next_cursor` 是本页最后返回的 sequence（JSON integer），有更多事件时为该值；没有更多事件或本页为空时为 `null`。`has_more=false` 时 `next_cursor` 必须为 `null`。因此客户端可把返回的整数作为下一次 `since`，但不能把它用于 live SSE 的 `Last-Event-ID` 以外的语义。历史页最多 8 项安全诊断。
+
+事件 envelope 保持第 4 节的 canonical schema、字段名、sequence 和 payload 业务含义。provider 必须保证历史响应有限：每个返回 envelope 的 JSON payload 预览不超过 65,536 字节，page 序列化结果不超过 8 MiB；超过部分使用第 4.1 节同形的 `{truncated, original_length, limit, encoding, head, tail}` preview object。响应不能通过截断 session ID、sequence 或 envelope identity 来满足上限。这个历史 projection 不回写 JSONL，live `events()` 仍遵守原有 Store-first 语义。
+
+### 1.3 Fixed persistence and history security
+
+生产 session 的唯一位置是：
+
+```text
+resolved_workspace / ".coding-agent-neo" / "sessions"
+```
+
+该目录由 composition 根据 resolved workspace 派生并可懒创建。生产 `AppConfig` 不再有 `session_dir` 字段，环境变量/TOML 不得提供同义覆盖，CLI 不再接受 `--session-dir`；这些旧输入必须走正常 unknown-option/config validation 并安全失败，不能被忽略、别名化或迁移。现有 CLI `--resume` 仍保留，但参数只能是 opaque `SESSION_ID`，不接受 JSONL 路径或文件名。旧 custom session directories 不自动发现或迁移。
+
+历史 candidate 只包含固定目录的直接子项：不递归、不跟随 symlink、不接受目录、隐藏临时文件或非 `.jsonl` 文件；文件名必须能安全投影为 `session_...` opaque ID。目录外已有 JSONL 永不被发现。所有 public ID 在 path construction 前验证：必须是字符串、使用 `session_` 前缀和安全 ASCII token，长度不超过 128，不能包含 `/`、`\\`、`.` suffix、NUL、控制字符、`..` 或任何 directory component；`PathLike`、绝对路径、相对路径、文件名和 query 参数都不是合法 history/resume 输入。最终解析的 candidate 必须仍是 fixed directory 的直接 regular file，任何 symlink escape、替换竞态或 containment 失败都安全拒绝。
+
+列表对单个损坏、不可读、空或 incomplete candidate 进行隔离：能安全推出 ID 时返回 `resumable=false` 和 bounded diagnostic，不能安全推出 ID 时跳过；健康 candidate 仍出现在同一 page。直接 read/resume 的 unknown ID、invalid ID 或当前不可恢复文件不得泄露文件存在性以外的路径细节，只返回下面稳定异常。
+
+Historical read 是有限 JSON DTO，不是 SSE、iterator、keepalive 或长期连接；它既不执行命令，也不 replay tool/shell side effects。resume 只恢复 root session/Agent identity、sequence、context 和 budget，并在后续新 turn 继续 append；不得把历史事件重新发送给 Agent Loop 当作待执行命令。
+
+### 1.4 Stable provider errors
+
+provider 异常是带稳定 `code` 的公开错误类型。异常 message 是固定安全短句；adapter 可以映射类型/code，但不得透传底层异常。
+
+| Exception | `code` | 条件 | 安全 message |
+| --- | --- | --- | --- |
+| `InvalidSessionHistoryIdError` | `invalid_history_id` | ID 不是合法 opaque `session_...` token，或包含路径/控制字符。 | `history session ID is invalid` |
+| `InvalidSessionHistoryCursorError` | `invalid_history_cursor` | list cursor 或 event `since` 缺失格式、过长、非 ASCII、过期、无法验证或超出 `2**63-1`。 | `history cursor is invalid` |
+| `InvalidSessionHistoryLimitError` | `invalid_history_limit` | `limit` 非 integer、为 boolean、低于 1 或超过对应上限。 | `history limit is invalid` |
+| `SessionHistoryNotFoundError` | `history_not_found` | 安全 ID 在 fixed directory 当前不存在。 | `session history was not found` |
+| `SessionHistoryUnavailableError` | `history_unavailable` | 文件存在但 JSONL/schema/identity/sequence 或安全读取校验失败。 | `session history is unavailable` |
+| `SessionResumeUnavailableError` | `invalid_resume` | resume 文件当前无法恢复（包括缺 root、context/budget 不完整或重校验失败）。 | `session cannot be resumed` |
+
+`list_sessions()` 不因单 candidate 诊断抛出 `SessionHistoryUnavailableError`；只有 page 级 fixed-directory 读取失败才可抛出安全 `history_unavailable`。所有异常和诊断都不得包含路径、session file 内容、用户文本、traceback、配置、凭据、provider payload 或任意原始 exception text。
 
 ## 2. `AgentBackend` Port
 
@@ -374,7 +525,8 @@ stateDiagram-v2
 | 命令与 `AgentBackend` Port | 当前 `src/coding_agent_neo/backend.py`；T01 后保持在该模块 |
 | 共享 `AgentBackendService`、worker、事件缓冲、授权通道 | `src/coding_agent_neo/backend_service.py` |
 | In-process Python binding | `src/coding_agent_neo/transports/in_process.py` (`InProcessAdapter`) |
-| 后端组装与 resume | `src/coding_agent_neo/assembly.py` (`build_agent_backend`, `build_in_process_adapter`) |
+| 后端组装与 resume | `src/coding_agent_neo/assembly.py`（canonical workspace provider/binding；`build_in_process_adapter` is compatibility facade） |
+| Workspace `AgentBackendProvider`、history DTO/exception contract | T01 versioned in Sections 1.1–1.4; provider implementation is deferred to T02–T05 |
 | EventEnvelope、事件名、状态枚举 | `src/coding_agent_neo/models.py` |
 | Store-first、脱敏与安全 JSON | `src/coding_agent_neo/events.py`, `src/coding_agent_neo/session.py` |
 | turn 生命周期和事件 payload | `src/coding_agent_neo/agent_loop.py` |
