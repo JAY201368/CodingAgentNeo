@@ -5,7 +5,7 @@
 > wire protocol：1；history DTO schema：1
 > 日期：2026-09-01
 > 后端依据：[agent-backend-interface.md](agent-backend-interface.md)
-> 实施工作流：[backed-history-discover/](backed-history-discover/)
+> 实施工作流：[backend-history-discover/](backend-history-discover/)
 
 本文定义 Agent 侧各适配层向对应前端公开的接口，使不同类型前端能够平等使用同一套后端语义。Adapter 实现者以 `agent-backend-interface.md` 为内部依据；前端不得越过 adapter 直接依赖该后端规范：CLI 参考本文第 3 节 In-process binding 与第 6 节共享规则，Web 与其他进程外前端参考第 4 节 HTTP/SSE binding 与第 6 节共享规则。
 
