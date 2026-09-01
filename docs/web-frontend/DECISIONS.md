@@ -1,6 +1,6 @@
 # CodingAgentNeo Web 前端决策日志
 
-本文件按时间追加持久、非显然且会影响下游的选择。Bootstrap 阶段条目均为待用户审阅的可逆规划决定，不代表实现已经完成。
+本文件按时间追加持久、非显然且会影响下游的选择。Bootstrap 条目保留当时的规划语境；当前实施与验收完成态以 `TASKS.md` 和 `PROGRESS.md` 为准。
 
 ## 2026-08-31 — ARCH 以 JSON command + SSE 桥接既有 Backend
 

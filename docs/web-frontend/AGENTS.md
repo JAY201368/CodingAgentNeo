@@ -32,8 +32,8 @@
 | `npm --prefix web run type-check` | Vue/TypeScript 类型检查 | T03 已建立（2026-09-01 实测） |
 | `npm --prefix web run test` | Web Vitest | T03 已建立（2026-09-01 实测） |
 | `npm --prefix web run build` | 生成 `web/dist` | T03 已建立（2026-09-01 实测） |
-| `.venv/bin/coding-agent-neo-web --help` | Web composition launcher | T09 |
-| `.venv/bin/python -m pytest tests/acceptance -m acceptance` | baseline 聚合验收 | baseline 已建立，T10 必跑 |
+| `.venv/bin/coding-agent-neo-web --help` | Web composition launcher | T09 已建立（2026-09-01 实测） |
+| `.venv/bin/python -m pytest tests/acceptance -m acceptance` | baseline + Web 聚合验收 | T10 已实测 55 passed（2026-09-01） |
 
 只对当前任务明确路径运行 formatter/自动修复；不得全仓机械重写。前台服务以 Ctrl+C 停止，不编造后台 PID 管理脚本。
 

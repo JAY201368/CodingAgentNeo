@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：T01～T09 已验收；T10 待串行实施
+> 状态：T01～T10 已全部验收
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -194,7 +194,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** 已交付独立 `web_launcher.py`/`coding-agent-neo-web` composition root，在任何 Agent/config/listener 副作用前校验外置 Vite dist；`/api/v1` 始终优先交给通用 HTTP ASGI app，extensionless Web 路径提供 SPA fallback，缺失静态资源保持 404，静态请求同样执行 Host/Origin 回环安全校验。通用 `coding-agent-neo-http` 与 `transports/http/` 未接触 Vue/Vite/静态路径，Vite dev proxy 与生产共用既有 `/api/v1` wire client；wheel 明确不夹带 `web/dist`、`node_modules` 或 coverage，安装态可用 `--dist-dir`。主 Agent 复核：launcher + transports 20 passed、全量 pytest 286 passed、Web 46 passed及 lint/type-check/build、Ruff、workflow validator、diff check 均通过；本机已有 `uv` 缓存离线构建 sdist/wheel并安装验证 console entry，真实 uvicorn 探针确认 API、SPA 与 `127.0.0.1` 监听。仅有 Starlette 第三方弃用警告；未执行真实模型或公网部署。
 
-### [ ] T10 — 完成端到端验收、运行文档与回归门
+### [x] T10 — 完成端到端验收、运行文档与回归门
 
 **依赖:** T09
 **范围:** 建立共享 adapter 与 Web 聚合验收、更新根运行/安全说明、核对 secret/生成物/依赖边界，完成 scripted 本地端到端；只修复既有契约内缺陷。真实网关仅在用户提供未入库环境变量时执行。
@@ -208,6 +208,8 @@ flowchart TD
 - 架构、接口、任务、进度和决策描述同一完成态；所有勾选卡有真实摘要与证据。
 
 **验证:** `npm --prefix web ci`; `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; `.venv/bin/python -m pytest`; `.venv/bin/python -m pytest tests/acceptance -m acceptance`; `.venv/bin/python -m ruff check .`; `.venv/bin/python -m ruff format --check .`; `.venv/bin/python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/web-frontend`; secret/依赖/包内容扫描与人工运行说明复核。
+
+**完成摘要（2026-09-01）:** 已完成 CLI/In-process、独立 Agent HTTP、两进程 Web 开发与同源 Web launcher 的运行/停止/安全/限制文档，并新增基于真实 `AgentBackendService` + HTTP/SSE 的 5 项 scripted Web 聚合验收，覆盖 task、tool success/failure、approval 批准/拒绝、interrupt、follow-up、断线补回、未知/截断 payload 与终止链；静态断言覆盖 Port/Service/adapter 依赖纯度、Web key/`v-html`/tool 边界和回环监听。主 Agent 复核：acceptance marker 55 passed、Python 全量 291 passed、Web 46 passed及 lint/type-check/build、Ruff、精确 `.venv/bin/python -m build`、三个入口 help、生产依赖树、wheel 内容、workflow validator、secret/依赖扫描和 diff check 均通过；仅有 Starlette 第三方弃用警告。用户已接管 npm 安装，本轮未重复运行 `npm ci`/`npm install`，使用现有依赖通过全部 Web 门，T03 保留此前 `npm ci` 证据；未执行真实模型网关或公网部署。
 
 ## 推荐顺序
 

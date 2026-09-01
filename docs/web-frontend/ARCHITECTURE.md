@@ -1,8 +1,8 @@
 # CodingAgentNeo 前端接入与 Web 前端增量架构
 
-> 状态：已按用户架构澄清完成 Change control，待审阅后实施
+> 状态：T01–T10 已实施并通过最终验收
 > 架构版本：0.3
-> 日期：2026-08-31
+> 日期：2026-09-01
 > 需求入口：[requirement.md](requirement.md)
 > Agent 后端规范：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层规范：[../agent-transport-interface.md](../agent-transport-interface.md)

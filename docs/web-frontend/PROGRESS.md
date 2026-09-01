@@ -13,11 +13,13 @@
 - T08 — 已完成既有 Web 旅程的极简浅色紫金视觉、CSS token、响应式断点、空/加载/错误态、状态图标与 `aria-live` 语义；桌面与 360px 窄屏保证无横向溢出，composer、timeline、工具卡、approval dialog 与 Stop 保持可用。授权 dialog 新增初始焦点、Tab/focusout 约束、Escape fail-closed 和 opener 焦点恢复；全局 focus-visible、`aria-busy` 与 `prefers-reduced-motion` 路径已加入。2026-09-01 实测 `npm --prefix web run lint`、`type-check`、`test`（46 passed）、`build` 均通过；Codex In-app Browser 人工检查 1280×720 和 360×800、完整 scripted 旅程、键盘路径、CSSOM reduced-motion 规则、对比度与控制台无误。实际矩阵与限制见 [T08_VISUAL_CHECK.md](T08_VISUAL_CHECK.md)；未执行真实模型、公网部署或 T09 组合入口。
 - T09 — 已新增独立 `web_launcher.py`/`coding-agent-neo-web` composition root：启动前校验外置 `web/dist/index.html`，将通用 Agent `/api/v1` ASGI app 与 SPA 静态层同源组合；API 路由优先，extensionless Web 路径回退 `index.html`，静态资源路径安全委托 Starlette，所有 HTTP 请求仍执行本地 Host/Origin 校验。`coding-agent-neo-http` 未改动且不 import/定位 Web 资源；Vite `/api` dev proxy 与生产同源路径共用既有 wire client。静态产物不进入 Python wheel，launcher 可用 `--dist-dir` 指定已构建目录；新增缺 dist、API 优先级、SPA fallback、回环参数、幂等关闭和 HTTP/Web 边界测试。主 Agent 复核：`tests/web_launcher` 6 passed、与 transports 合跑在显式 `NO_PROXY/no_proxy=127.0.0.1,localhost` 下 20 passed、全量 pytest 286 passed（仅 Starlette 第三方弃用警告），Web lint/type-check/test（46）/build、Ruff、workflow validator 和 diff check 均通过；使用本机已有 `uv` 缓存离线成功构建 sdist/wheel、安装 editable entry point 并执行 `coding-agent-neo-web --help`，wheel 内容确认不含 Web/Node 产物；真实 loopback 组合探针确认 API/SPA 与 `127.0.0.1` 监听。未声称真实模型、外网或公网部署验证。
 
+- T10 — 已新增 `tests/acceptance/test_web_frontend_acceptance.py` 聚合验收：使用真实 `AgentBackendService`、本机 uvicorn/httpx 和 HTTP/SSE wire，脚本化覆盖任务、工具 success/error、授权批准/拒绝、follow-up、SSE 断线补回、Interrupt 的 `turn_end → agent_end → session_end` 终止链，以及未知/整体截断 payload 透传；另含 backend/service、HTTP adapter、Web `.ts`/`.vue` 的依赖、secret 与资源边界断言。主 Agent 最终复核：新增 5 passed、acceptance marker 55 passed、Python 全量 291 passed；Web lint/type-check/test（46）/build、Ruff lint/format、`.venv/bin/python -m build`、三个 CLI help、生产依赖树、wheel 内容、workflow validator、静态扫描与 diff check 均通过。用户接管 npm 依赖安装后，本轮未再运行 `npm ci`/`npm install`，使用其现有依赖执行并通过全部 Web 门；T03 已保留此前 `npm ci` 通过证据。测试模型/环境仍为 fake/scripted，未冒充真实网关、宿主 shell 隔离或公网部署。
+
 ## Current State
 
 - 2026-08-31 已完成 Bootstrap 及两轮 Change control：`docs/agent-backend-interface.md` 定义 Port 与共享 Backend Service 语义；`docs/agent-transport-interface.md` 是并列 In-process/HTTP binding、HTTP wire/event schema 与共享 adapter 规则的唯一前端接入权威。前端实现 adapter 接入时需要且只需要参考该文档。
 - 既有 Python Agent 后端与 CLI 基线保持不变；HTTP/SSE Agent binding 已可独立运行，`web/` 可独立启动并通过 Vite `/api` 代理连接本地 Agent HTTP。
-- 当前增量已完成 T01/T02/T03/T04/T05/T06/T07/T08/T09；T09 组合入口默认读取源码树或 `--dist-dir` 提供的已构建 Web 目录，服务器重启后的历史恢复仍不在首版范围。
+- 当前增量 T01～T10 已全部实施并由主 Agent 验收；Web 组合入口默认读取源码树或 `--dist-dir` 提供的已构建 Web 目录，服务器重启后的历史恢复仍不在首版范围。
 
 ## Known Issues
 
@@ -30,8 +32,8 @@
 - T03 的额外 `npm audit --omit=dev` 在当前华为云 npm 镜像上因 audit POST 端点返回 405，未形成依赖审计通过证据；任务要求的 `npm ci`、lint、type-check、test 和 build 均已通过。
 - T07 的刷新重连仅承诺仍存活 Agent HTTP 进程中的 transport session；服务器重启或未知/已关闭 session 会清除标识并要求新建，不能恢复历史 timeline。测试使用 fake fetch、scripted service 和本地 HTTP wiring，未声称真实模型、真实浏览器或公网部署证据。
 - T08 的 reduced-motion 规则已在真实 IAB CSSOM 中确认，但该浏览器运行时未提供直接切换系统 reduced-motion 偏好的能力；因此未伪造强制偏好截图。无装饰动画的正常路径、静态规则与自动化质量门均已检查。
-- 当前 `.venv` 不直接安装 `setuptools`/`wheel`，因此 `.venv/bin/python -m build --no-isolation` 不可用；主 Agent 已改用本机现有 `uv` 缓存离线完成标准 sdist/wheel 构建与 entry point 验证，没有触发网络安装。默认 `web/dist` 已由 Web build 生成但保持 gitignored。
+- T10 最终验收从本机 `uv` 缓存离线补齐 Python 构建后端后，`.venv/bin/python -m build` 已通过；默认 `web/dist` 已由 Web build 生成但保持 gitignored。
 
 ## Next Recommended Task
 
-- T10 — 完成端到端验收、运行文档与回归门。
+- 无；本工作流 T01～T10 已全部验收。远程部署、跨进程 Web resume、并发 session 或真实网关验证均需新的需求与安全契约。

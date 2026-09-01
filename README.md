@@ -38,12 +38,26 @@ With non-interactive `ask`, bash is immediately denied and stdin is never consum
 
 Adapter implementers use the versioned [Agent backend interface specification](docs/agent-backend-interface.md) as the internal command, event, cursor, approval, and lifecycle authority. Frontends use only their corresponding binding in the [Agent adapter interface specification](docs/agent-transport-interface.md). The CLI obtains the explicit `InProcessAdapter` through `build_in_process_adapter`; the shared runtime is `AgentBackendService` from `build_agent_backend`.
 
+## Local runtime modes
+
+The CLI uses the explicit in-process adapter in the same Python process; it
+does not start an HTTP listener. Install the development extra, configure the
+ignored local TOML file and run it as described above. Stop an interactive run
+with Ctrl+C; the documented exit codes and JSONL session behavior remain the
+same as the baseline.
+
 The optional, frontend-independent Agent HTTP/SSE binding is available with:
 
 ```bash
 python -m pip install -e ".[dev,http]"
 coding-agent-neo-http --config .coding-agent-neo.toml
 ```
+
+This is an API-only process. It listens on `127.0.0.1:8765` by default (use
+`--port` for another local port), has one active transport session, and does
+not serve Web assets. Stop it with Ctrl+C. The process reads the model,
+workspace, approval mode, session directory and API key from its Agent-side
+configuration; browser requests cannot supply or read those values.
 
 For Web development, run the Agent HTTP service above and start Vite in a
 second process. Vite forwards only `/api` to the loopback Agent service, so the
@@ -52,6 +66,11 @@ browser uses the same `/api/v1` wire client as the production composition:
 ```bash
 npm --prefix web run dev
 ```
+
+The Vite process needs no API key. Keep both terminals running while using the
+Web UI and stop each process separately with Ctrl+C. This two-process mode is
+for development and uses the same loopback-only Agent API as the composition
+launcher.
 
 For a same-origin local demonstration, build the Web assets and start the
 separate composition root:
@@ -67,6 +86,14 @@ The Python wheel contains no Node dependencies or Web build output; use
 `--dist-dir PATH` when launching from an installed package with an external
 Vite build. The launcher does not build or inject configuration into static
 HTML, and a missing build is rejected before the service starts.
+
+The composition launcher is a standalone alternative to the two-process
+development setup, not a second API implementation. Stop it with Ctrl+C. An
+installed Python package can use an externally built directory:
+
+```bash
+coding-agent-neo-web --config .coding-agent-neo.toml --dist-dir /path/to/web/dist
+```
 
 The Web package can also be run independently for frontend development; the
 Vite server itself does not require an API key, although Agent interactions
@@ -87,7 +114,16 @@ npm --prefix web run test
 npm --prefix web run build
 ```
 
-The Web package targets Node.js 20+ and npm 10+. Stop the Vite development server with Ctrl+C. Agent HTTP/SSE connectivity and product interactions are planned for later Web tasks.
+The Web package targets Node.js 20+ and npm 10+.
+
+All modes are intended for one local user and one linear transport session;
+there is no remote/public deployment, authentication, multi-user control
+plane, concurrent session, or server-restart Web resume. The browser stores
+only an opaque transport ID and event cursor for refresh reconnects while the
+Agent process is alive. It never receives an API key, and `--api-key` is not a
+supported option. Local `bash` inherits the launching user's permissions and
+is not an OS sandbox; review approval mode and workspace configuration before
+allowing commands.
 
 The [Agent adapter interface specification](docs/agent-transport-interface.md) is the sole
 authority for its binding, wire, event, error, security, configuration, and lifecycle contract;
