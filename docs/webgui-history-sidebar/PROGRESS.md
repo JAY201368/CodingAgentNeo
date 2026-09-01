@@ -7,18 +7,22 @@
 - T03 — 历史列表状态与分页 composable：`useSessionHistory` 首次无 cursor 加载、原样回送 `next_cursor` 翻页、refresh 清错误、loading/空/错误三态互斥；失败保留上一页。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/composables`（42 passed）/build 通过。
 - T04 — 展示型历史侧边栏：按序渲染有界摘要，不可恢复项可见但不 emit select，switching 禁用选择，error !== null 即错误态。无 v-html。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/components`（20 passed）/build 通过。未改 App.vue。
 - T05 — sidebar + 右侧居中主区与恢复旅程接线：标题在侧边栏顶部；`select` 接到 `resumeSession`；switching 锁定 composer；失败 fail-closed 并给出新建入口；活跃 turn 一次确认。2026-09-01 主 Agent 复跑 lint/type-check/`test`（120 passed）/build 通过。窄屏抽屉与视觉打磨留 T06。
+- T06 — Codex 式侧边栏视觉、响应式与可访问性：640px 起 overlay 抽屉；汉堡 `aria-expanded`/`aria-controls`；Escape/遮罩关闭；状态不只靠颜色。2026-09-02 主 Agent 复跑 lint/type-check/`test`（123 passed）/build 通过。独立浏览器：桌面 1379px 无溢出、无汉堡、侧边栏 288px；360px 无溢出，「历史」打开后 sidebarLeft=0，Escape 关闭。未声称真实 resume 通过。
 
 ## Current State
 
-- T05 已验收。可观察行为：
-  - `App.vue` 根结构为 `.app-layout`：左侧 `HistorySidebar`（可选 `title` slot 放 `h1#app-title` / eyebrow）+ 右侧 `.app-main` 内居中 `.app-shell`。原对话流、composer、授权、消息尾部入口、结束 Session 均在主区；主区最大宽度 `--conversation`。
-  - `useSessionHistory` 与 `useAgentSession` 注入**同一个** `props.client ?? new AgentHttpClient()`；App 不直接 `fetch`/`localStorage`。
-  - `activeSessionId` 只保存 canonical `session_...`（`selectedHistorySessionId`）；成功 resume 后写入该 id 并 `history.refresh()`（刷新失败忽略）；新建/结束/fail-closed 无活跃 transport 时清空。不把 `transport_session_id` 当当前项。
-  - `@select` → 若有活跃 turn/`SubmitTask` in-flight/等待授权则 `window.confirm`；取消不 DELETE/resume；确认或无活跃 turn 则 `resumeSession(id)`。`switching` 时侧边栏禁用选择、composer `disabled`。
-  - resume 失败（404/422/409 稳定码）走 `handleFailure(..., 'resume')`：安全中文提示、不透传后端正文、不自动 `POST {}`；`session_exists` 在切换语境提示「当前 session 已结束，请新建」而非「关闭其他页面」。无活跃 session 时出现「新建 session」。
-  - Worker 验证（2026-09-01）：lint 通过；type-check 通过；`npm --prefix web run test` 120 passed（含既有 App 路径 + 布局/select→resume/切换锁/成功重现/fail-closed/确认）；build 通过。
-  - 未做 T06 窄屏抽屉、对比度打磨与 Codex 视觉细化。
-
+- T06 已验收。可观察行为：
+  - 桌面（≥641px）：侧边栏占文档流 18rem，汉堡不渲染；主区在侧边栏右侧居中；composer `left: var(--sidebar-width)`。
+  - 窄屏（≤640px）：侧边栏默认移出文档流（overlay）；「历史」按钮 `aria-controls="history-sidebar"`；打开后滑入（reduced-motion 下近乎瞬间）、半透明遮罩点击关闭、Escape 关闭并焦点回到按钮；主区 `.app-shell` `inert`。选择 session 后关闭抽屉。状态不写 localStorage。
+  - 信息层级：摘要为主、元信息次之；当前项左边框 +「当前」文字 + 加粗；不可恢复虚线左边框 +「不可恢复」深金文字；切换有「正在切换 session…」。
+  - 人工视觉检查（Cursor 内置浏览器，Chromium；Agent HTTP 可能在线但**不声称真实 resume 通过**）：
+    - 1280×800：无横向溢出（`scrollWidth===clientWidth===1280`）；无汉堡；侧边栏 288px in-flow；主区从 x=288 起、shell 宽 832 居中；标题南大紫。
+    - 360×640 关闭：无横向溢出；汉堡「历史」可见；主区宽 360；composer `left:0`、宽 336；侧边栏 `translateX(-288)` / `visibility:hidden` / `inert`。
+    - 360×640 打开：侧边栏 x=0 可见；遮罩存在；标题在汉堡下方不被挡住（开态 `padding-top`）；Escape 关闭且焦点回汉堡。
+    - 对比度（计算）：正文 14.83、标题紫/白 11.83、muted 7.88–8.57、subtle 6.39、gold-ink 7.65，均 ≥ WCAG 2.2 AA。
+    - reduced-motion：抽屉 `transition-duration` 为 `0.01ms`（`none 1e-05s`）。
+    - 发现与修正：开态汉堡盖住标题 → 开态侧边栏增加 `padding-top`；窄屏 Tab 可能落到遮罩后的 composer → 开态 `.app-shell` `inert`。
+  - Worker 命令：`npm --prefix web run lint` 通过；`type-check` 通过；`test` 123 passed；`build` 通过。
 
 - 2026-09-01 已完成工作流初始化：`requirement.md`、`ARCHITECTURE.md`、`TASKS.md`、`AGENTS.md`、`PROMPT_TEMPLATE.md`、`PROGRESS.md`、`DECISIONS.md` 就位，`validate_workflow.py` 结构校验通过。
 - 依赖前序工作流均已交付：Web 前端 `../web-frontend/`（T01–T10）与后端/适配层历史/恢复能力 `../backend-history-discover/`（T01–T06）。
@@ -44,10 +48,10 @@
 - 「切换 session」在 wire 上是「先 DELETE 当前、再 POST resume」的串行操作（单活跃 session 规则）；先终结后 resume 失败会导致当前 session 已终结且无活跃 session，须 fail-closed 提示新建，不自动重建（见 `ARCHITECTURE.md` §3.3、`DECISIONS.md`）。T02 状态核与 T05 App 接线均已覆盖该窗口：锁定侧边栏/composer、安全错误、新建入口。
 - resume + live SSE 不 replay 历史事件；目标 session 历史消息由有限历史读取 hydration 后再接续 SSE。T02 覆盖幂等/跳号/多页/截断/未知事件；T05 已把 hydration 结果接到主区 timeline。
 - 活跃 turn/等待授权时切换的一次 `window.confirm` 仍为可逆假设（默认仍终结当前）；若用户希望「运行中也直接无提示切换」或「运行中禁止切换」，须更新 `requirement.md`、`ARCHITECTURE.md` 与 DECISIONS。
-- 视觉「参考 Codex 设计」为方向性描述，具体信息层级与折叠交互在 T06 落地并需人工视觉证据；南大金色仍为产品可访问 token，非校方官方 HEX。
+- 视觉「参考 Codex 设计」为方向性描述；T06 已落地 640px overlay 抽屉、紫金信息层级与人工 1280/360 证据。南大金色仍为产品可访问 token，非校方官方 HEX。
 - 真实模型网关、真实浏览器与公网部署不在本轮；相关证据只能标注为离线/脚本化，不得冒充真实验证。
 - 浏览器 `since` 只能精确表示 `Number.MAX_SAFE_INTEGER`（2^53-1）以内的整数，是 wire `0..2^63-1` 的 JS 安全子集；超出安全整数的值在发请求前按 `invalid_history_cursor` 拒绝。
 
 ## Next Recommended Task
 
-- T06 — 完成 Codex 式侧边栏视觉、响应式与可访问性。依赖 T05；只优化布局与视觉，不新增业务。窄屏抽屉/对比度/reduced-motion/键盘路径属本卡。
+- T07 — 完成端到端验收、运行文档与回归门。依赖 T06；只修复 T01–T06 集成缺陷，不改 Python 契约。

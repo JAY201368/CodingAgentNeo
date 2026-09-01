@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Execute（T01–T05 已验收；其余任务串行派发中）
+> 状态：Execute（T01–T06 已验收；T07 待派发）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -116,7 +116,7 @@ flowchart TD
 
 ## 阶段 D：视觉、可访问性与交付
 
-### [ ] T06 — 完成 Codex 式侧边栏视觉、响应式与可访问性
+### [x] T06 — 完成 Codex 式侧边栏视觉、响应式与可访问性
 
 **依赖：** T05
 **范围：** 在 `web/src/style.css`（及必要的组件样式）完成侧边栏 + 主区的浅色紫金视觉、Codex 式信息层级、桌面/窄屏响应式（窄屏侧边栏折叠/抽屉化）、加载/空/错误态样式、键盘路径、可见焦点、`aria` 语义与 reduced-motion。只优化布局与视觉，不新增业务、校徽或部署耦合。
@@ -129,6 +129,8 @@ flowchart TD
 - 无重型组件库、装饰动画滥用、校徽复制或无关 dashboard；视觉检查记录浏览器、尺寸、发现与修正。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test`；`npm --prefix web run build`；人工桌面/360px/键盘/reduced-motion/对比度检查。
+
+**完成摘要（2026-09-02）：** 窄屏（≤640px）侧边栏改为 overlay 抽屉，「历史」按钮开关，Escape/遮罩关闭；桌面侧边栏 in-flow。主 Agent 复跑 lint/type-check/`test`（123 passed）/build 通过。独立浏览器：1280 无汉堡、无横向溢出；360 无溢出，抽屉打开 sidebarLeft=0、Escape 关闭。未做真实 resume 端到端。
 
 ### [ ] T07 — 完成端到端验收、运行文档与回归门
 

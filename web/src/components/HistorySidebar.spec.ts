@@ -165,6 +165,8 @@ describe('HistorySidebar', () => {
     expect(buttons[1]?.attributes('aria-current')).toBe('true')
     expect(wrapper.findAll('.history-sidebar__item--current')).toHaveLength(1)
     expect(wrapper.get('.history-sidebar__item--current').text()).toContain('two')
+    expect(wrapper.get('.history-sidebar__item--current .history-sidebar__current-mark').text()).toBe('当前')
+    expect(wrapper.findAll('.history-sidebar__current-mark')).toHaveLength(1)
   })
 
   it('disables selection while switching and does not emit', async () => {
@@ -174,6 +176,7 @@ describe('HistorySidebar', () => {
     })
     const button = wrapper.get('.history-sidebar__select')
     expect((button.element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.get('[role="status"]').text()).toContain('正在切换 session')
     await button.trigger('click')
     expect(wrapper.emitted('select')).toBeUndefined()
   })

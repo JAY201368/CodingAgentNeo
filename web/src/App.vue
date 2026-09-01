@@ -33,13 +33,64 @@ const session = useAgentSession({
 const history = useSessionHistory({
   client: sharedClient,
 })
+const HISTORY_SIDEBAR_ID = 'history-sidebar'
+const NARROW_MEDIA_QUERY = '(max-width: 640px)'
+
 const composer = ref<InstanceType<typeof TaskComposer> | null>(null)
 const sessionEntry = ref<globalThis.HTMLElement | null>(null)
+const historyToggle = ref<globalThis.HTMLButtonElement | null>(null)
 const actionError = ref<string | null>(null)
 const connecting = ref(false)
 const endingSession = ref(false)
 const selectedHistorySessionId = ref<string | null>(null)
+const historyDrawerOpen = ref(false)
+const isNarrowViewport = ref(false)
 let connectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+let unsubscribeNarrowMedia: (() => void) | null = null
+
+function closeHistoryDrawer(): void {
+  historyDrawerOpen.value = false
+}
+
+function toggleHistoryDrawer(): void {
+  historyDrawerOpen.value = !historyDrawerOpen.value
+}
+
+function onNarrowMediaChange(event: { readonly matches: boolean }): void {
+  isNarrowViewport.value = event.matches
+  if (!event.matches) {
+    historyDrawerOpen.value = false
+  }
+}
+
+function onDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !historyDrawerOpen.value) {
+    return
+  }
+  closeHistoryDrawer()
+  void nextTick(() => {
+    historyToggle.value?.focus()
+  })
+}
+
+function subscribeNarrowMedia(): void {
+  if (typeof globalThis.matchMedia !== 'function') {
+    return
+  }
+  const media = globalThis.matchMedia(NARROW_MEDIA_QUERY)
+  isNarrowViewport.value = media.matches
+  if (typeof media.addEventListener === 'function') {
+    media.addEventListener('change', onNarrowMediaChange)
+    unsubscribeNarrowMedia = () => {
+      media.removeEventListener('change', onNarrowMediaChange)
+    }
+    return
+  }
+  media.addListener(onNarrowMediaChange)
+  unsubscribeNarrowMedia = () => {
+    media.removeListener(onNarrowMediaChange)
+  }
+}
 
 const timelineItems = computed(() => projectTimeline(session.state.value.events))
 const pendingApproval = computed(() => session.state.value.pendingApproval)
@@ -210,8 +261,13 @@ async function endSession(): Promise<void> {
     await session.deleteSession()
     selectedHistorySessionId.value = null
     await nextTick()
+    const reduceMotion = typeof globalThis.matchMedia === 'function' &&
+      globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches
     if (typeof sessionEntry.value?.scrollIntoView === 'function') {
-      sessionEntry.value.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      sessionEntry.value.scrollIntoView({
+        behavior: reduceMotion ? 'auto' : 'smooth',
+        block: 'end',
+      })
     } else {
       const root = globalThis.document.scrollingElement ?? globalThis.document.documentElement
       root.scrollTop = root.scrollHeight
@@ -224,6 +280,7 @@ async function endSession(): Promise<void> {
 }
 
 function onSelectHistory(historySessionId: string): void {
+  closeHistoryDrawer()
   void selectHistorySession(historySessionId)
 }
 
@@ -263,6 +320,8 @@ function onRefresh(): void {
 }
 
 onMounted(() => {
+  subscribeNarrowMedia()
+  globalThis.document.addEventListener('keydown', onDocumentKeydown)
   if (!props.autoConnect) {
     return
   }
@@ -275,6 +334,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  unsubscribeNarrowMedia?.()
+  unsubscribeNarrowMedia = null
+  globalThis.document.removeEventListener('keydown', onDocumentKeydown)
   if (connectTimer !== null) {
     globalThis.clearTimeout(connectTimer)
     connectTimer = null
@@ -284,8 +346,21 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-layout">
+  <div
+    class="app-layout"
+    :class="{ 'app-layout--drawer-open': isNarrowViewport && historyDrawerOpen }"
+  >
+    <div
+      v-if="isNarrowViewport && historyDrawerOpen"
+      class="history-drawer-backdrop"
+      @click="closeHistoryDrawer"
+    />
+
     <HistorySidebar
+      :id="HISTORY_SIDEBAR_ID"
+      :class="{ 'history-sidebar--open': historyDrawerOpen }"
+      :inert="isNarrowViewport && !historyDrawerOpen ? true : undefined"
+      :aria-hidden="isNarrowViewport && !historyDrawerOpen ? true : undefined"
       :items="history.items.value"
       :loading="history.loading.value"
       :error="history.error.value"
@@ -307,9 +382,31 @@ onBeforeUnmount(() => {
     </HistorySidebar>
 
     <div class="app-main">
+      <button
+        v-if="isNarrowViewport"
+        ref="historyToggle"
+        class="history-drawer-toggle"
+        type="button"
+        :aria-expanded="historyDrawerOpen"
+        :aria-controls="HISTORY_SIDEBAR_ID"
+        :aria-label="historyDrawerOpen ? '关闭历史' : '打开历史'"
+        @click="toggleHistoryDrawer"
+      >
+        <span
+          class="history-drawer-toggle__icon"
+          aria-hidden="true"
+        >
+          <span />
+          <span />
+          <span />
+        </span>
+        <span>{{ historyDrawerOpen ? '关闭历史' : '历史' }}</span>
+      </button>
+
       <main
         class="app-shell"
         aria-labelledby="app-title"
+        :inert="isNarrowViewport && historyDrawerOpen ? true : undefined"
       >
         <header
           v-if="showEndSession"

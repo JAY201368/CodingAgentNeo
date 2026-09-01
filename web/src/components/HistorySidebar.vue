@@ -74,9 +74,11 @@ function refresh(): void {
 
 <template>
   <aside
+    id="history-sidebar"
     class="history-sidebar"
     aria-label="历史 session"
-    :aria-busy="loading"
+    tabindex="-1"
+    :aria-busy="loading || switching"
   >
     <header
       v-if="$slots.title"
@@ -94,7 +96,11 @@ function refresh(): void {
         role="status"
         aria-live="polite"
       >
-        {{ error.message }}
+        <span
+          class="alert__mark"
+          aria-hidden="true"
+        >!</span>
+        <span>{{ error.message }}</span>
       </p>
       <button
         class="secondary-action history-sidebar__refresh"
@@ -107,12 +113,25 @@ function refresh(): void {
     </div>
 
     <p
+      v-if="switching"
+      class="history-sidebar__status history-sidebar__switching"
+      role="status"
+      aria-live="polite"
+    >
+      正在切换 session…
+    </p>
+
+    <p
       v-if="showInitialLoading"
       class="history-sidebar__status loading-note"
       role="status"
       aria-live="polite"
     >
-      正在加载历史 session…
+      <span
+        class="loading-mark"
+        aria-hidden="true"
+      >◌</span>
+      <span>正在加载历史 session…</span>
     </p>
 
     <p
@@ -121,7 +140,11 @@ function refresh(): void {
       role="status"
       aria-live="polite"
     >
-      还没有历史 session。
+      <span
+        class="history-sidebar__empty-mark"
+        aria-hidden="true"
+      >–</span>
+      <span>还没有历史 session。</span>
     </p>
 
     <ul
@@ -148,6 +171,10 @@ function refresh(): void {
         >
           <span class="history-sidebar__summary">{{ itemSummary(item) }}</span>
           <span class="history-sidebar__meta">
+            <span
+              v-if="isActive(item)"
+              class="history-sidebar__current-mark"
+            >当前</span>
             <span class="history-sidebar__time">{{ itemTimestamp(item) }}</span>
             <span class="history-sidebar__state">{{ itemState(item) }}</span>
             <span

@@ -717,3 +717,128 @@ describe('App history sidebar wiring', () => {
     wrapper.unmount()
   })
 })
+
+type MediaListener = (event: MediaQueryListEvent) => void
+
+function stubMatchMedia(matches: boolean): void {
+  const listeners = new Set<MediaListener>()
+  vi.stubGlobal('matchMedia', (query: string) => {
+    const media = {
+      get matches() {
+        return query.includes('max-width: 640px') ? matches : false
+      },
+      media: query,
+      addEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
+        if (typeof listener === 'function') {
+          listeners.add(listener as MediaListener)
+        }
+      },
+      removeEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
+        if (typeof listener === 'function') {
+          listeners.delete(listener as MediaListener)
+        }
+      },
+      addListener(listener: MediaListener) {
+        listeners.add(listener)
+      },
+      removeListener(listener: MediaListener) {
+        listeners.delete(listener)
+      },
+      dispatchEvent() {
+        return false
+      },
+      onchange: null,
+    }
+    return media
+  })
+}
+
+describe('App history drawer layout', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('does not render the history toggle on a desktop viewport', async () => {
+    stubMatchMedia(false)
+    const scripted = makeHistoryAppClient()
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await nextTask()
+    await flushPromises()
+
+    expect(wrapper.find('.history-drawer-toggle').exists()).toBe(false)
+    expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(false)
+    expect(wrapper.get('.app-layout').classes()).not.toContain('app-layout--drawer-open')
+    expect(wrapper.get('#history-sidebar').attributes('inert')).toBeUndefined()
+    expect(wrapper.get('#history-sidebar').attributes('aria-hidden')).toBeUndefined()
+    expect(wrapper.get('.app-shell').attributes('inert')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('opens the history drawer from the toggle and closes it with the backdrop and Escape', async () => {
+    stubMatchMedia(true)
+    const scripted = makeHistoryAppClient()
+    const wrapper = mount(App, {
+      props: { client: scripted.client, storage: null },
+      attachTo: document.body,
+    })
+    await nextTask()
+    await flushPromises()
+
+    const toggle = wrapper.get('.history-drawer-toggle')
+    expect(toggle.text()).toContain('历史')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.attributes('aria-controls')).toBe('history-sidebar')
+    expect(wrapper.get('#history-sidebar').attributes('inert')).not.toBeUndefined()
+    expect(wrapper.get('#history-sidebar').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(false)
+    expect(wrapper.get('.app-shell').attributes('inert')).toBeUndefined()
+
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.history-drawer-toggle').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('.history-drawer-toggle').attributes('aria-label')).toBe('关闭历史')
+    expect(wrapper.get('.app-layout').classes()).toContain('app-layout--drawer-open')
+    expect(wrapper.get('#history-sidebar').classes()).toContain('history-sidebar--open')
+    expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(true)
+    expect(wrapper.get('#history-sidebar').attributes('inert')).toBeUndefined()
+    expect(wrapper.get('#history-sidebar').attributes('aria-hidden')).toBeUndefined()
+    expect(wrapper.get('.app-shell').attributes('inert')).not.toBeUndefined()
+
+    await wrapper.get('.history-drawer-backdrop').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.history-drawer-toggle').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(false)
+    expect(wrapper.get('.app-layout').classes()).not.toContain('app-layout--drawer-open')
+
+    await wrapper.get('.history-drawer-toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.get('.history-drawer-toggle').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('closes the narrow drawer after selecting a history session', async () => {
+    stubMatchMedia(true)
+    const scripted = makeHistoryAppClient()
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await nextTask()
+    await flushPromises()
+
+    await wrapper.get('.history-drawer-toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.app-layout').classes()).toContain('app-layout--drawer-open')
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await flushPromises()
+    await nextTask()
+    await flushPromises()
+
+    expect(wrapper.get('.history-drawer-toggle').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('.app-layout').classes()).not.toContain('app-layout--drawer-open')
+    wrapper.unmount()
+  })
+})
