@@ -88,7 +88,7 @@ flowchart TD
 
 **Completed 2026-09-01:** Added the canonical pre-session `InProcessWorkspaceBinding`, provider-only history/read/create delegation, provider-routed compatibility builders, and preserved per-session lifecycle/resume metadata and CLI opaque-ID behavior. Main-agent verification: focused matrix reported 30 passed; Ruff check/format, workflow validator, and `git diff --check` passed. Reusable conformance exercises real fixed JSONL listing/event bounds, typed invalid inputs, Resume cursor/sequence continuation, and no historical message replay; composition spies prove exactly one provider/create path. Worker full-suite evidence reported 325 passed with one third-party Starlette warning.
 
-### [ ] T05 — Expose finite history and resume through HTTP
+### [x] T05 — Expose finite history and resume through HTTP
 
 **Dependencies:** T03  
 **Scope:** Add documented history DTO/query decoding, finite JSON routes, stable error mappings, and `resume_session_id` session creation to the HTTP adapter and registry. Preserve live SSE and command behavior. Do not serve raw files, disclose paths, or modify Web UI/API client code.  
@@ -100,6 +100,8 @@ flowchart TD
 - Fake mapping tests and real-provider integration tests distinguish transport conformance from runtime evidence.
 
 **Verification:** `python -m pytest tests/transports/test_http_transport.py tests/integration/test_http_history.py tests/security -q`; `python -m ruff check src tests`; `python -m ruff format --check src tests`.
+
+**Completed 2026-09-01:** Added provider-only finite HTTP history list/event routes, strict bounded query/body decoding, stable safe history/resume errors, and resumed session creation with the recovered cursor while preserving single-active-session, live SSE/command, Host/Origin, and shutdown behavior. Main-agent verification: focused HTTP/history/security matrix reported 34 passed with one third-party Starlette warning; shared adapter conformance reported 5 passed; Web launcher/acceptance regression reported 11 passed with the same warning; Ruff check/format, workflow validator, and `git diff --check` passed. Worker full-suite evidence reported 340 passed.
 
 ## Stage D: Integrated acceptance
 

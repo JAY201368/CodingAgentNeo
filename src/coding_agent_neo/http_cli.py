@@ -8,7 +8,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from coding_agent_neo import __version__
-from coding_agent_neo.assembly import build_agent_backend
+from coding_agent_neo.assembly import build_agent_backend_provider
+from coding_agent_neo.backend import AgentBackendProvider
 from coding_agent_neo.config import ConfigError, load_config
 
 DEFAULT_HOST = "127.0.0.1"
@@ -107,7 +108,7 @@ def run_server(
     config: Any,
     *,
     port: int = DEFAULT_PORT,
-    backend_factory=build_agent_backend,
+    provider: AgentBackendProvider | None = None,
     log_level: str = "warning",
 ) -> None:
     """Build the Agent HTTP app and hand it to uvicorn on loopback only."""
@@ -119,10 +120,9 @@ def run_server(
 
     from coding_agent_neo.transports.http import create_app
 
-    def configured_factory(*, interactive: bool):
-        return backend_factory(config, interactive=interactive)
-
-    app = create_app(backend_factory=configured_factory)
+    if provider is None:
+        provider = build_agent_backend_provider(config, interactive=True)
+    app = create_app(provider)
     uvicorn.run(
         app,
         host=DEFAULT_HOST,

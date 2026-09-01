@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
 from queue import Queue
@@ -12,12 +11,10 @@ from uuid import uuid4
 
 from coding_agent_neo.backend import (
     AgentBackend,
+    AgentBackendProvider,
     BackendClosedError,
     CloseSession,
 )
-from coding_agent_neo.backend_factory import AgentBackendFactory
-
-_MISSING = object()
 
 
 class SessionExistsError(RuntimeError):
@@ -205,12 +202,24 @@ def _close_backend(
 class TransportSession:
     """An opaque transport ID and its one injected backend port."""
 
-    def __init__(self, transport_session_id: str, backend: AgentBackend) -> None:
+    def __init__(
+        self,
+        transport_session_id: str,
+        backend: AgentBackend,
+        *,
+        initial_cursor: int = 0,
+    ) -> None:
+        if (
+            isinstance(initial_cursor, bool)
+            or not isinstance(initial_cursor, int)
+            or initial_cursor < 0
+        ):
+            raise ValueError("initial_cursor must be a non-negative integer")
         self.transport_session_id = transport_session_id
         self._backend = backend
         self._lock = threading.Lock()
         self._closed = False
-        self._cursor = 0
+        self._cursor = initial_cursor
         self._close_thread: threading.Thread | None = None
         self._event_pump = _SessionEventPump(backend)
 
@@ -315,13 +324,12 @@ class TransportSessionRegistry:
 
     def __init__(
         self,
-        backend_factory: Callable[..., AgentBackend],
+        provider: AgentBackendProvider,
         *,
-        config: Any = _MISSING,
         close_timeout_seconds: float = 30.0,
     ) -> None:
-        if not callable(backend_factory):
-            raise TypeError("backend_factory must be callable")
+        if not isinstance(provider, AgentBackendProvider):
+            raise TypeError("provider must implement AgentBackendProvider")
         if (
             isinstance(close_timeout_seconds, bool)
             or not isinstance(close_timeout_seconds, (int, float))
@@ -329,8 +337,7 @@ class TransportSessionRegistry:
             or close_timeout_seconds <= 0
         ):
             raise ValueError("close_timeout_seconds must be a positive number")
-        self._backend_factory = backend_factory
-        self._config = config
+        self._provider = provider
         self._close_timeout = float(close_timeout_seconds)
         self._lock = threading.Lock()
         self._sessions: dict[str, TransportSession] = {}
@@ -346,22 +353,49 @@ class TransportSessionRegistry:
                 return None
             return session
 
-    def create(self) -> TransportSession:
-        """Allocate one backend through the composition-injected factory."""
+    @property
+    def provider(self) -> AgentBackendProvider:
+        """Return the one provider owned by this registry."""
+
+        return self._provider
+
+    def create(self, *, resume_session_id: str | None = None) -> TransportSession:
+        """Allocate one new or resumed backend through the provider."""
 
         with self._lock:
             if self._active_id is not None:
                 active = self._sessions.get(self._active_id)
                 if active is not None and not active.closed:
                     raise SessionExistsError("an active transport session already exists")
-            if self._config is _MISSING:
-                backend = self._backend_factory(interactive=True)
-            else:
-                backend = self._backend_factory(self._config, interactive=True)
+            backend = self._provider.create_session(resume_session_id=resume_session_id)
             if not isinstance(backend, AgentBackend):
-                raise TypeError("backend_factory must return an AgentBackend port")
+                raise TypeError("provider must return an AgentBackend port")
+            initial_cursor = 0
+            if resume_session_id is not None:
+                initial_cursor = getattr(backend, "resume_last_sequence", 0)
+                if initial_cursor is None:
+                    initial_cursor = 0
+                if (
+                    isinstance(initial_cursor, bool)
+                    or not isinstance(initial_cursor, int)
+                    or initial_cursor < 0
+                ):
+                    raise TypeError("provider resume cursor must be a non-negative integer")
             transport_session_id = f"transport_{uuid4().hex}"
-            session = TransportSession(transport_session_id, backend)
+            try:
+                session = TransportSession(
+                    transport_session_id,
+                    backend,
+                    initial_cursor=initial_cursor,
+                )
+            except BaseException:
+                _close_backend(
+                    backend,
+                    "session_start_failed",
+                    self._close_timeout,
+                    send_command=False,
+                )
+                raise
             self._sessions[transport_session_id] = session
             self._active_id = transport_session_id
             return session
@@ -416,15 +450,11 @@ class TransportSessionRegistry:
         )
 
 
-# Short aliases are convenient for embedders while the explicit name remains
-# clear in the dependency boundary and test fixtures.
-BackendFactory = AgentBackendFactory
 SessionRegistry = TransportSessionRegistry
 
 
 __all__ = [
-    "AgentBackendFactory",
-    "BackendFactory",
+    "AgentBackendProvider",
     "RegistrySnapshot",
     "SessionExistsError",
     "SessionRegistry",

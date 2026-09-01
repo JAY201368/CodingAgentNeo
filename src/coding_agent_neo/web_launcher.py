@@ -17,7 +17,8 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from coding_agent_neo.assembly import build_agent_backend
+from coding_agent_neo.assembly import build_agent_backend_provider
+from coding_agent_neo.backend import AgentBackendProvider
 from coding_agent_neo.config import ConfigError, load_config
 from coding_agent_neo.http_cli import (
     DEFAULT_HOST,
@@ -171,7 +172,7 @@ class WebCompositionApp:
 def create_app(
     dist_dir: str | Path | None = None,
     *,
-    backend_factory=build_agent_backend,
+    provider: AgentBackendProvider | None = None,
     config: Any = _CONFIG_MISSING,
     allowed_hosts: Iterable[str] | None = None,
     allowed_origins: Iterable[str] | None = None,
@@ -194,15 +195,17 @@ def create_app(
     except ImportError as error:  # pragma: no cover - guarded by the http extra
         raise RuntimeError("HTTP dependencies are not installed; use the http extra") from error
 
-    api_app = create_http_app(
-        backend_factory=backend_factory,
-        **({"config": config} if config is not _CONFIG_MISSING else {}),
-        allowed_hosts=normalized_allowed_hosts,
-        allowed_origins=normalized_allowed_origins,
-        keepalive_seconds=keepalive_seconds,
-        max_body_bytes=max_body_bytes,
-        close_timeout_seconds=close_timeout_seconds,
-    )
+    if provider is None and config is not _CONFIG_MISSING:
+        provider = build_agent_backend_provider(config, interactive=True)
+    api_kwargs: dict[str, Any] = {
+        "allowed_hosts": normalized_allowed_hosts,
+        "allowed_origins": normalized_allowed_origins,
+        "keepalive_seconds": keepalive_seconds,
+        "max_body_bytes": max_body_bytes,
+        "close_timeout_seconds": close_timeout_seconds,
+    }
+    api_kwargs["provider"] = provider
+    api_app = create_http_app(**api_kwargs)
     return WebCompositionApp(
         api_app,
         SPAStaticFiles(directory),
@@ -243,7 +246,7 @@ def run_server(
     *,
     dist_dir: str | Path | None = None,
     port: int = DEFAULT_PORT,
-    backend_factory=build_agent_backend,
+    provider: AgentBackendProvider | None = None,
     log_level: str = "warning",
 ) -> None:
     """Run the composed app on loopback only after validating Web assets."""
@@ -257,7 +260,9 @@ def run_server(
     except ImportError as error:  # pragma: no cover - guarded by the http extra
         raise RuntimeError("HTTP dependencies are not installed; use the http extra") from error
 
-    app = create_app(directory, backend_factory=backend_factory, config=config)
+    if provider is None:
+        provider = build_agent_backend_provider(config, interactive=True)
+    app = create_app(directory, provider=provider)
     uvicorn.run(
         app,
         host=DEFAULT_HOST,

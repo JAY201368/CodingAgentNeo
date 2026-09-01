@@ -16,7 +16,6 @@ from coding_agent_neo.backend import (
     SubmitTask,
 )
 from coding_agent_neo.models import EventType, RuntimeState
-from coding_agent_neo.transports.in_process import InProcessAdapter
 
 
 def test_workspace_history_binding_conformance(history_binding, tmp_path: Path) -> None:
@@ -61,8 +60,10 @@ def test_workspace_history_binding_conformance(history_binding, tmp_path: Path) 
         binding.read_session_events(scenario.session_id, limit=201)
 
     resumed = binding.create_session(resume_session_id=scenario.session_id)
-    assert isinstance(resumed, InProcessAdapter)
     assert resumed.resume_last_sequence == scenario.original_last_sequence
+    assert callable(resumed.send)
+    assert callable(resumed.events)
+    assert callable(resumed.close)
     try:
         resumed.send(SubmitTask("continue history"))
         follow_up_events = wait_session(

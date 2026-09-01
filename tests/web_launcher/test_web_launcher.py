@@ -42,6 +42,25 @@ class FakeBackend:
         self.close_calls += 1
 
 
+class FakeProvider:
+    """Provider-port fake used by the Web composition tests."""
+
+    def __init__(self, backend: FakeBackend) -> None:
+        self.backend = backend
+
+    def list_sessions(self, *, cursor: str | None = None, limit: int = 50):
+        del cursor, limit
+        raise AssertionError("Web composition test must not read history")
+
+    def read_session_events(self, session_id: str, *, since: int = 0, limit: int = 200):
+        del session_id, since, limit
+        raise AssertionError("Web composition test must not read history")
+
+    def create_session(self, *, resume_session_id: str | None = None):
+        del resume_session_id
+        return self.backend
+
+
 def _dist(tmp_path: Path) -> Path:
     directory = tmp_path / "web-dist"
     directory.mkdir()
@@ -57,10 +76,7 @@ def _dist(tmp_path: Path) -> Path:
 
 def test_api_routes_win_and_extensionless_paths_use_spa_fallback(tmp_path: Path) -> None:
     backend = FakeBackend()
-    app = build_app(
-        _dist(tmp_path),
-        backend_factory=lambda *, interactive: backend,
-    )
+    app = build_app(_dist(tmp_path), provider=FakeProvider(backend))
 
     with TestClient(app) as client:
         health = client.get("/api/v1/health")
@@ -97,7 +113,7 @@ def test_api_routes_win_and_extensionless_paths_use_spa_fallback(tmp_path: Path)
 
 def test_api_session_lifecycle_remains_idempotent_through_wrapper(tmp_path: Path) -> None:
     backend = FakeBackend()
-    app = build_app(_dist(tmp_path), backend_factory=lambda *, interactive: backend)
+    app = build_app(_dist(tmp_path), provider=FakeProvider(backend))
 
     with TestClient(app) as client:
         created = client.post("/api/v1/sessions", json={})
@@ -109,21 +125,15 @@ def test_api_session_lifecycle_remains_idempotent_through_wrapper(tmp_path: Path
     assert backend.close_calls == 1
 
 
-def test_missing_dist_is_rejected_before_api_factory_or_config_side_effect(
+def test_missing_dist_is_rejected_before_api_provider_or_config_side_effect(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     missing = tmp_path / "private" / "missing-dist"
-    factory_calls = 0
-
-    def factory(**_kwargs):
-        nonlocal factory_calls
-        factory_calls += 1
-        raise AssertionError("backend factory must not run")
+    provider = FakeProvider(FakeBackend())
 
     with pytest.raises(WebAssetsError, match="Web build"):
-        build_app(missing, backend_factory=factory)
-    assert factory_calls == 0
+        build_app(missing, provider=provider)
 
     # The CLI path validates the build before attempting to load an API key or
     # any other configuration.  Its safe diagnostic does not echo the private
@@ -155,7 +165,7 @@ def test_run_server_passes_loopback_host_and_port(monkeypatch, tmp_path: Path) -
         object(),
         dist_dir=dist,
         port=9123,
-        backend_factory=lambda **_kwargs: backend,
+        provider=FakeProvider(backend),
     )
 
     assert calls["host"] == "127.0.0.1"

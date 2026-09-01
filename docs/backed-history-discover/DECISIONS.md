@@ -43,3 +43,9 @@ Add only durable, non-obvious decisions with downstream consequences.
 - Choice: `build_in_process_workspace_binding(config, interactive=...)` returns a pre-session `InProcessWorkspaceBinding`; its list/read/create methods delegate only to one workspace-scoped `AgentBackendProvider`, and compatibility builders create exactly one provider-owned session.
 - Rationale and rejected alternative: constructing a backend directly in a compatibility builder would leave a second composition path that bypasses the history contract; the binding keeps history selection and per-session lifecycle behind the same provider while preserving the baseline CLI facade.
 - Consequences: controlled Python callers can page history before creating a session, resumed adapters retain `resume_last_sequence`/`resume_diagnostics`, and CLI opaque-ID/error behavior remains compatible while HTTP remains a separate T05 binding.
+
+## 2026-09-01 — T05 keeps HTTP composition provider-only
+
+- Choice: the HTTP registry receives one `AgentBackendProvider`; it asks that provider to create a new or resumed backend only after enforcing the single-active-session slot, and initializes a resumed transport cursor from provider-owned `resume_last_sequence` metadata.
+- Rationale and rejected alternative: passing a backend factory into the registry or adapting one inside the HTTP app would preserve a second composition path that cannot expose history or resume semantics. The composition root constructs the workspace-scoped provider and passes that single dependency to the HTTP app.
+- Consequences: finite history routes can map typed provider errors without importing `SessionStore`, repositories, paths, or the In-process adapter; HTTP callers must provide the canonical provider contract for both live sessions and history.
