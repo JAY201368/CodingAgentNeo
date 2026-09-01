@@ -47,6 +47,63 @@ _WIRE_FIXTURE = json.loads(
 )
 
 
+def test_shared_wire_fixture_includes_history_and_resume_samples() -> None:
+    """Browser and Python HTTP tests must share one history/resume wire sample."""
+
+    history = _WIRE_FIXTURE["history"]
+    listing = history["list"]
+    assert set(listing) == {"sessions", "next_cursor"}
+    item = listing["sessions"][0]
+    assert set(item) >= {
+        "session_id",
+        "first_user_message",
+        "created_at",
+        "updated_at",
+        "last_sequence",
+        "last_state",
+        "resumable",
+        "diagnostics",
+    }
+    bounded = item["first_user_message"]
+    assert set(bounded) >= {"text", "truncated", "original_length", "limit", "encoding"}
+    assert item["session_id"].startswith("session_")
+    assert listing["next_cursor"] is None or isinstance(listing["next_cursor"], str)
+
+    events_page = history["events"]
+    assert set(events_page) >= {
+        "session_id",
+        "events",
+        "next_cursor",
+        "has_more",
+        "diagnostics",
+    }
+    assert events_page["session_id"] == item["session_id"]
+    assert events_page["events"][0]["schema_version"] == 1
+    assert events_page["events"][0]["sequence"] == 1
+    empty_page = history["events_empty"]
+    assert empty_page["events"] == []
+    assert empty_page["has_more"] is False
+    assert empty_page["next_cursor"] is None
+    preview = history["truncated_payload"]
+    assert preview["truncated"] is True
+    assert set(preview) >= {"truncated", "original_length", "limit", "encoding", "head", "tail"}
+
+    resume = history["resume"]
+    assert resume["request"] == {"resume_session_id": item["session_id"]}
+    assert set(resume["response"]) >= {"transport_session_id", "state", "cursor"}
+    assert resume["response"]["transport_session_id"].startswith("transport_")
+    assert resume["response"]["transport_session_id"] != item["session_id"]
+
+    codes = {error["code"]: error["status"] for error in _WIRE_FIXTURE["history_errors"]}
+    assert codes["invalid_history_id"] == 400
+    assert codes["invalid_history_cursor"] == 400
+    assert codes["invalid_history_limit"] == 400
+    assert codes["history_not_found"] == 404
+    assert codes["history_unavailable"] == 422
+    assert codes["invalid_resume"] == 422
+    assert codes["session_exists"] == 409
+
+
 def _event(sequence: int, event_type: str = "assistant_message") -> EventEnvelope:
     """Build fake canonical events from the browser contract fixture."""
 

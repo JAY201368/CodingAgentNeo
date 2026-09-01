@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Bootstrap（全部未实现；等待审阅后串行派发）
+> 状态：Execute（T01 已验收；其余任务串行派发中）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -26,7 +26,7 @@ flowchart TD
 
 ## 阶段 A：历史 wire 客户端与领域解析
 
-### [ ] T01 — 交付历史列表/事件/恢复的 wire client 与防御性 DTO
+### [x] T01 — 交付历史列表/事件/恢复的 wire client 与防御性 DTO
 
 **依赖：** 无
 **范围：** 仅参考 `../agent-transport-interface.md` 第 4.2 节（history resources）、4.5.1 节（resume 创建）和第 6 节共享规则，在 `web/src/api/client.ts` 新增 `listSessionHistory({limit?, cursor?})`、`readSessionHistoryEvents(sessionId, {since?, limit?})` 与扩展 `createSession(resumeSessionId?)`，并在 `web/src/domain/`（`protocol.ts` 或新增 `history.ts`）新增 `SessionHistoryItem`/`SessionHistoryPage`/`SessionEventPage`/`BoundedText` 类型与防御性 parser、历史/恢复稳定错误码归一化。复用既有 wire fixture 机制，新增历史/事件/ resume 样例并与 Python HTTP 历史测试共享同一 fixture。排除 composable、侧边栏、App 布局与视觉。
@@ -41,6 +41,8 @@ flowchart TD
 - 浏览器契约测试与 Python `tests/transports`/`tests/integration/test_http_history.py` 使用同一 wire fixture 样例，避免协议漂移。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/api src/domain`；`npm --prefix web run build`；`git diff --check`。
+
+**完成摘要（2026-09-01）：** 已交付 `listSessionHistory`、`readSessionHistoryEvents` 与向后兼容的 `createSession(resumeSessionId?)`；历史 DTO 防御性解析与七个稳定错误码使用客户端自有短句。主 Agent 复跑 `npm --prefix web run lint`、`type-check`、`test -- src/api src/domain`（42 passed）、`build`、`git diff --check` 均通过。未实现 composable/侧边栏/布局。浏览器 `since` 上限为 JS 安全整数（见 DECISIONS）。
 
 ## 阶段 B：状态核（列表 + 恢复旅程）
 

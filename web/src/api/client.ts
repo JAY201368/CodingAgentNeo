@@ -10,10 +10,22 @@ import {
   RuntimeState,
   SessionCreatedResponse,
   SessionStatusResponse,
+  asTransportSessionId,
   isNonNegativeInteger,
   isRecord,
   isRuntimeState,
 } from '../domain/protocol'
+import type { CanonicalSessionId } from '../domain/protocol'
+import {
+  isCanonicalSessionId,
+  isHistoryEventLimit,
+  isHistoryListLimit,
+  isHistorySince,
+  isOpaqueHistoryListCursor,
+  parseSessionEventPage,
+  parseSessionHistoryPage,
+} from '../domain/history'
+import type { SessionEventPage, SessionHistoryPage } from '../domain/history'
 
 export type ApiErrorCode =
   | 'invalid_host'
@@ -21,9 +33,15 @@ export type ApiErrorCode =
   | 'invalid_session_request'
   | 'invalid_cursor'
   | 'invalid_command'
+  | 'invalid_history_id'
+  | 'invalid_history_cursor'
+  | 'invalid_history_limit'
   | 'session_not_found'
+  | 'history_not_found'
   | 'session_exists'
   | 'turn_in_progress'
+  | 'history_unavailable'
+  | 'invalid_resume'
   | 'session_closed'
   | 'internal_error'
   | 'network_error'
@@ -36,12 +54,28 @@ const KNOWN_API_ERROR_CODES: readonly ApiErrorCode[] = [
   'invalid_session_request',
   'invalid_cursor',
   'invalid_command',
+  'invalid_history_id',
+  'invalid_history_cursor',
+  'invalid_history_limit',
   'session_not_found',
+  'history_not_found',
   'session_exists',
   'turn_in_progress',
+  'history_unavailable',
+  'invalid_resume',
   'session_closed',
   'internal_error',
 ]
+
+const CLIENT_OWNED_ERROR_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
+  invalid_history_id: 'history session ID is invalid',
+  invalid_history_cursor: 'history cursor is invalid',
+  invalid_history_limit: 'history limit is invalid',
+  history_not_found: 'session history was not found',
+  history_unavailable: 'session history is unavailable',
+  invalid_resume: 'session cannot be resumed',
+  session_exists: 'an active transport session already exists',
+}
 
 export class AgentApiError extends Error {
   readonly name: string = 'AgentApiError'
@@ -94,6 +128,18 @@ export interface EventStreamHandlers {
   readonly onEvent?: (message: AgentEventStreamMessage) => void
 }
 
+export interface ListSessionHistoryOptions {
+  readonly limit?: number
+  readonly cursor?: string
+  readonly signal?: AbortSignal
+}
+
+export interface ReadSessionHistoryEventsOptions {
+  readonly since?: number
+  readonly limit?: number
+  readonly signal?: AbortSignal
+}
+
 interface RequestOptions {
   readonly method: 'GET' | 'POST' | 'DELETE'
   readonly path: string
@@ -123,13 +169,6 @@ function requestUrl(baseUrl: string, path: string): string {
     return path
   }
   return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`
-}
-
-function errorCode(value: unknown, fallback: ApiErrorCode): ApiErrorCode {
-  if (typeof value === 'string' && (KNOWN_API_ERROR_CODES as readonly string[]).includes(value)) {
-    return value as ApiErrorCode
-  }
-  return fallback
 }
 
 function fallbackErrorCode(status: number, fallback: ApiErrorCode | undefined): ApiErrorCode {
@@ -178,6 +217,10 @@ async function responseJson(response: Response): Promise<unknown> {
   }
 }
 
+function ownedErrorMessage(code: ApiErrorCode): string | undefined {
+  return CLIENT_OWNED_ERROR_MESSAGES[code]
+}
+
 function responseError(
   status: number,
   body: unknown,
@@ -185,10 +228,43 @@ function responseError(
 ): AgentApiError {
   const fallback = fallbackErrorCode(status, fallbackCode)
   if (isRecord(body) && isRecord(body.error)) {
-    const code = errorCode(body.error.code, fallback)
-    return new AgentApiError(status, code, safeErrorMessage(body.error.message, DEFAULT_ERROR_MESSAGE))
+    const rawCode = body.error.code
+    const known =
+      typeof rawCode === 'string' && (KNOWN_API_ERROR_CODES as readonly string[]).includes(rawCode)
+    if (known) {
+      const code = rawCode as ApiErrorCode
+      const owned = ownedErrorMessage(code)
+      if (owned !== undefined) {
+        return new AgentApiError(status, code, owned)
+      }
+      return new AgentApiError(
+        status,
+        code,
+        safeErrorMessage(body.error.message, DEFAULT_ERROR_MESSAGE),
+      )
+    }
+    return new AgentApiError(status, fallback, DEFAULT_ERROR_MESSAGE)
   }
   return new AgentApiError(status, fallback, DEFAULT_ERROR_MESSAGE)
+}
+
+function historyClientError(
+  code: 'invalid_history_id' | 'invalid_history_cursor' | 'invalid_history_limit',
+): AgentApiError {
+  return new AgentApiError(400, code, CLIENT_OWNED_ERROR_MESSAGES[code] ?? DEFAULT_ERROR_MESSAGE)
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return typeof AbortSignal !== 'undefined' && value instanceof AbortSignal
+}
+
+function queryString(params: ReadonlyArray<readonly [string, string]>): string {
+  if (params.length === 0) {
+    return ''
+  }
+  return `?${params
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&')}`
 }
 
 function isSuccessful(response: Response): boolean {
@@ -224,7 +300,7 @@ function parseCreated(body: unknown): SessionCreatedResponse {
     throw new AgentProtocolError('session 创建响应不符合 transport binding')
   }
   return {
-    transport_session_id: body.transport_session_id,
+    transport_session_id: asTransportSessionId(body.transport_session_id),
     state: body.state,
     cursor: body.cursor,
   }
@@ -479,15 +555,94 @@ export class AgentHttpClient {
     return parseHealth(await responseJson(requireStatus(response, 200)))
   }
 
-  async createSession(signal?: AbortSignal): Promise<SessionCreatedResponse> {
+  /**
+   * Create a new transport session, or resume a canonical history session.
+   *
+   * The first argument may be an `AbortSignal` so existing callers that pass
+   * only a signal keep sending `{}`. POST is never automatically replayed.
+   */
+  async createSession(
+    resumeSessionIdOrSignal?: CanonicalSessionId | string | AbortSignal,
+    signal?: AbortSignal,
+  ): Promise<SessionCreatedResponse> {
+    let resumeSessionId: string | undefined
+    let abortSignal = signal
+    if (isAbortSignal(resumeSessionIdOrSignal)) {
+      abortSignal = resumeSessionIdOrSignal
+    } else if (resumeSessionIdOrSignal !== undefined) {
+      resumeSessionId = resumeSessionIdOrSignal
+    }
+
+    const body =
+      resumeSessionId === undefined
+        ? {}
+        : { resume_session_id: this.requireHistorySessionId(resumeSessionId) }
     const response = await this.request({
       method: 'POST',
       path: `${BASE_PATH}/sessions`,
-      body: {},
-      signal,
-      fallbackCode: 'invalid_session_request',
+      body,
+      signal: abortSignal,
+      fallbackCode: resumeSessionId === undefined ? 'invalid_session_request' : 'invalid_history_id',
     })
     return parseCreated(await responseJson(requireStatus(response, 201)))
+  }
+
+  async listSessionHistory(options: ListSessionHistoryOptions = {}): Promise<SessionHistoryPage> {
+    const params: Array<readonly [string, string]> = []
+    if (options.limit !== undefined) {
+      if (!isHistoryListLimit(options.limit)) {
+        throw historyClientError('invalid_history_limit')
+      }
+      params.push(['limit', String(options.limit)])
+    }
+    if (options.cursor !== undefined) {
+      if (!isOpaqueHistoryListCursor(options.cursor)) {
+        throw historyClientError('invalid_history_cursor')
+      }
+      params.push(['cursor', options.cursor])
+    }
+    const response = await this.request({
+      method: 'GET',
+      path: `${BASE_PATH}/session-history${queryString(params)}`,
+      signal: options.signal,
+      fallbackCode: 'invalid_history_limit',
+    })
+    const body = await responseJson(requireStatus(response, 200))
+    if (!isRecord(body)) {
+      throw new AgentProtocolError('session history 响应不符合 transport binding')
+    }
+    return parseSessionHistoryPage(body)
+  }
+
+  async readSessionHistoryEvents(
+    sessionId: CanonicalSessionId | string,
+    options: ReadSessionHistoryEventsOptions = {},
+  ): Promise<SessionEventPage> {
+    const id = this.requireHistorySessionId(sessionId)
+    const params: Array<readonly [string, string]> = []
+    if (options.since !== undefined) {
+      if (!isHistorySince(options.since)) {
+        throw historyClientError('invalid_history_cursor')
+      }
+      params.push(['since', String(options.since)])
+    }
+    if (options.limit !== undefined) {
+      if (!isHistoryEventLimit(options.limit)) {
+        throw historyClientError('invalid_history_limit')
+      }
+      params.push(['limit', String(options.limit)])
+    }
+    const response = await this.request({
+      method: 'GET',
+      path: `${BASE_PATH}/session-history/${encodeURIComponent(id)}/events${queryString(params)}`,
+      signal: options.signal,
+      fallbackCode: 'history_not_found',
+    })
+    const body = await responseJson(requireStatus(response, 200))
+    if (!isRecord(body)) {
+      throw new AgentProtocolError('session history events 响应不符合 transport binding')
+    }
+    return parseSessionEventPage(body)
   }
 
   async getSession(transportSessionId: string, signal?: AbortSignal): Promise<SessionStatusResponse> {
@@ -578,6 +733,13 @@ export class AgentHttpClient {
       throw new AgentApiError(400, 'session_not_found', 'transport session id is invalid')
     }
     return transportSessionId
+  }
+
+  private requireHistorySessionId(sessionId: CanonicalSessionId | string): CanonicalSessionId {
+    if (!isCanonicalSessionId(sessionId)) {
+      throw historyClientError('invalid_history_id')
+    }
+    return sessionId
   }
 }
 

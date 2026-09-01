@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,46 @@ from coding_agent_neo.backend import BackendClosedError, CloseSession, SubmitTas
 from coding_agent_neo.config import AppConfig
 from coding_agent_neo.models import EventType, NormalizedAssistantResponse
 from coding_agent_neo.transports.http import create_app
+
+_WIRE_FIXTURE = json.loads(
+    (
+        Path(__file__).parents[2] / "web" / "src" / "domain" / "fixtures" / "transport-v1.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def test_browser_wire_fixture_history_samples_match_http_shape() -> None:
+    """Keep HTTP history integration tests aligned with the shared browser fixture."""
+
+    history = _WIRE_FIXTURE["history"]
+    listing = history["list"]
+    item = listing["sessions"][0]
+    assert set(listing) == {"sessions", "next_cursor"}
+    assert set(item) == {
+        "session_id",
+        "first_user_message",
+        "created_at",
+        "updated_at",
+        "last_sequence",
+        "last_state",
+        "resumable",
+        "diagnostics",
+    }
+    assert set(item["first_user_message"]) == {
+        "text",
+        "truncated",
+        "original_length",
+        "limit",
+        "encoding",
+    }
+    events_page = history["events"]
+    assert set(events_page) == {"session_id", "events", "next_cursor", "has_more", "diagnostics"}
+    assert events_page["session_id"].startswith("session_")
+    resume = history["resume"]
+    assert set(resume["request"]) == {"resume_session_id"}
+    assert set(resume["response"]) == {"transport_session_id", "state", "cursor"}
+    assert resume["response"]["transport_session_id"].startswith("transport_")
+    assert resume["request"]["resume_session_id"] == events_page["session_id"]
 
 
 def _config(tmp_path: Path) -> AppConfig:

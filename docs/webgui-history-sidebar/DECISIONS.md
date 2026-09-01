@@ -31,3 +31,15 @@
 - 选择：默认行为是点击即终结当前并 resume；但当前 session 存在活跃 turn 或等待授权时，先弹出一次显式确认再终结，确认取消则不改变当前 session。
 - 理由与替代：需求说「默认终结当前 session」，未明确活跃 turn 中途切换的期望。直接无提示终结可能让用户误触丢失正在运行的工作；一次确认在不违背「默认终结」的前提下提供 fail-safe。替代方案是完全无确认（更贴近字面「默认」）或运行中禁止切换（过度限制）。
 - 后果：这是可逆规划假设，标注在此并在 `PROGRESS.md`/`TASKS.md` T05 体现。若用户希望「运行中也直接无提示切换」或「运行中禁止切换」，须在实现 T05 前更新 `requirement.md`、`ARCHITECTURE.md` 与本条决策；在确认前 T05 仍可实现，但确认交互须易于调整。
+
+## 2026-09-01 — T01：`createSession` 第一参数探测 AbortSignal，保持既有调用点
+
+- 选择：扩展 `createSession(resumeSessionId?, signal?)` 时，若第一参数是 `AbortSignal` 则仍发送空 `{}` 并把它当作 abort signal；只有非 signal 的字符串才作为 `resume_session_id`。
+- 理由与替代：既有 `useAgentSession` 以 `createSession(signal)` 调用。把 AbortSignal 当成 resume ID 会发非法 body。替代方案是改调用点为 `createSession(undefined, signal)`，同样属于 T01 兼容修复，但探测第一参数可避免改 composable（T02 范围）。
+- 后果：T02 新增 `resumeSession` 时应显式传 canonical `resumeSessionId`（或 `createSession(id, signal)`），不要依赖位置参数的类型猜测以外的语义。
+
+## 2026-09-01 — T01：历史 `since` 在浏览器按 JS 安全整数校验
+
+- 选择：`readSessionHistoryEvents` 的 `since` 在发请求前要求 `Number.isSafeInteger` 且 `>= 0`（上限 `Number.MAX_SAFE_INTEGER`），而不是尝试表示 wire 的完整 `0..2^63-1`。
+- 理由与替代：JavaScript `number` 无法精确表示 2^63-1。把超安全整数的值编码进 query 会静默丢失精度。拒绝它们并映射 `invalid_history_cursor` 比发送错误 cursor 更安全。
+- 后果：超过 2^53-1 的 sequence 无法作为浏览器 `since` 发出；当前事件 sequence 从 1 递增，实际不会触及该上限。若未来需要全范围整数，须改用字符串十进制 query 并作为跨工作流契约变更。

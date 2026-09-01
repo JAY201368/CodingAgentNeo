@@ -191,3 +191,249 @@ describe('AgentHttpClient', () => {
     await expect(client.health()).rejects.toBeInstanceOf(AgentApiError)
   })
 })
+
+describe('AgentHttpClient history and resume', () => {
+  it('lists history with default and explicit query params without decoding cursors', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return jsonResponse(fixture.history.list)
+    })
+    const client = new AgentHttpClient({ baseUrl: 'http://127.0.0.1:8765', fetchImpl })
+
+    await expect(client.listSessionHistory()).resolves.toMatchObject({
+      sessions: [{ session_id: 'session_fixture_1', resumable: true }],
+      next_cursor: 'opaque_history_cursor_fixture_1',
+    })
+    await expect(
+      client.listSessionHistory({
+        limit: 50,
+        cursor: fixture.history.list.next_cursor,
+      }),
+    ).resolves.toMatchObject({ next_cursor: 'opaque_history_cursor_fixture_1' })
+    const injected = await client.listSessionHistory({ cursor: 'offset=10&path=/secret' })
+    expect(injected.sessions[0]?.session_id).toBe('session_fixture_1')
+
+    expect(String(calls[0].input)).toBe('http://127.0.0.1:8765/api/v1/session-history')
+    expect(calls[0].init?.method).toBe('GET')
+    expect(String(calls[1].input)).toBe(
+      'http://127.0.0.1:8765/api/v1/session-history?limit=50&cursor=opaque_history_cursor_fixture_1',
+    )
+    expect(String(calls[2].input)).toBe(
+      `http://127.0.0.1:8765/api/v1/session-history?cursor=${encodeURIComponent('offset=10&path=/secret')}`,
+    )
+    expect(String(calls[2].input)).not.toContain('path=/secret')
+  })
+
+  it('rejects illegal list limit and cursor before fetch', async () => {
+    const fetchImpl = vi.fn()
+    const client = new AgentHttpClient({ fetchImpl })
+    await expect(client.listSessionHistory({ limit: 0 })).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_history_limit',
+      message: 'history limit is invalid',
+    })
+    await expect(client.listSessionHistory({ limit: 101 })).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_history_limit',
+    })
+    await expect(client.listSessionHistory({ cursor: '' })).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_history_cursor',
+      message: 'history cursor is invalid',
+    })
+    await expect(client.listSessionHistory({ cursor: 'x'.repeat(257) })).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_history_cursor',
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('reads history events with session_ token checks and since/limit bounds', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.includes('events_empty')) {
+        return jsonResponse(fixture.history.events_empty)
+      }
+      return jsonResponse(fixture.history.events)
+    })
+    const client = new AgentHttpClient({ baseUrl: 'http://127.0.0.1:8765', fetchImpl })
+    const page = await client.readSessionHistoryEvents('session_fixture_1', {
+      since: 0,
+      limit: 200,
+    })
+    expect(page.events.map((event) => event.sequence)).toEqual([1, 2])
+    expect(page.has_more).toBe(true)
+    expect(page.next_cursor).toBe(2)
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      'http://127.0.0.1:8765/api/v1/session-history/session_fixture_1/events?since=0&limit=200',
+    )
+
+    await expect(client.readSessionHistoryEvents('session_fixture_1')).resolves.toMatchObject({
+      session_id: 'session_fixture_1',
+    })
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toBe(
+      'http://127.0.0.1:8765/api/v1/session-history/session_fixture_1/events',
+    )
+  })
+
+  it('rejects unsafe history IDs, since, and event limits before fetch', async () => {
+    const fetchImpl = vi.fn()
+    const client = new AgentHttpClient({ fetchImpl })
+    const invalidIds = [
+      'transport_fixture_1',
+      '../outside',
+      'session_foo/bar',
+      'session_foo\\bar',
+      'session_foo.',
+      'session_foo.jsonl',
+      'session_foo\0bar',
+      '/absolute/session_x',
+    ]
+    for (const sessionId of invalidIds) {
+      await expect(client.readSessionHistoryEvents(sessionId)).rejects.toMatchObject({
+        status: 400,
+        code: 'invalid_history_id',
+        message: 'history session ID is invalid',
+      })
+    }
+    await expect(
+      client.readSessionHistoryEvents('session_fixture_1', { since: -1 }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_history_cursor' })
+    await expect(
+      client.readSessionHistoryEvents('session_fixture_1', { limit: 201 }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_history_limit' })
+    await expect(
+      client.createSession('../outside'),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_history_id' })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('sends {} by default, resume_session_id only when resuming, and never replays POST', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        throw new TypeError('connection lost after send')
+      }
+      void input
+      return jsonResponse(fixture.history.list)
+    })
+    const client = new AgentHttpClient({ fetchImpl })
+    await expect(client.createSession()).rejects.toBeInstanceOf(AgentNetworkError)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect((fetchImpl.mock.calls[0]?.[1] as RequestInit).body).toBe('{}')
+
+    const abort = new AbortController()
+    await expect(client.createSession(abort.signal)).rejects.toBeInstanceOf(AgentNetworkError)
+    expect((fetchImpl.mock.calls[1]?.[1] as RequestInit).body).toBe('{}')
+    expect((fetchImpl.mock.calls[1]?.[1] as RequestInit).signal).toBe(abort.signal)
+
+    await expect(
+      client.createSession(fixture.history.resume.request.resume_session_id),
+    ).rejects.toBeInstanceOf(AgentNetworkError)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    expect((fetchImpl.mock.calls[2]?.[1] as RequestInit).body).toBe(
+      JSON.stringify(fixture.history.resume.request),
+    )
+    expect(Object.keys(JSON.parse(String((fetchImpl.mock.calls[2]?.[1] as RequestInit).body)))).toEqual([
+      'resume_session_id',
+    ])
+  })
+
+  it('parses resume create responses and keeps AbortSignal as the first argument compatible', async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe('POST')
+      return jsonResponse(fixture.history.resume.response, 201)
+    })
+    const client = new AgentHttpClient({ fetchImpl })
+    const created = await client.createSession('session_fixture_1')
+    expect(created).toEqual(fixture.history.resume.response)
+    expect(created.transport_session_id).toBe('transport_fixture_1')
+    expect(created.cursor).toBe(4)
+
+    const abort = new AbortController()
+    await client.createSession(undefined, abort.signal)
+    expect((fetchImpl.mock.calls[1]?.[1] as RequestInit).body).toBe('{}')
+    expect((fetchImpl.mock.calls[1]?.[1] as RequestInit).signal).toBe(abort.signal)
+  })
+
+  it('maps history and resume stable errors without exposing backend message text', async () => {
+    const cases = fixture.history_errors
+    for (const sample of cases) {
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse(
+          { error: { code: sample.code, message: 'private traceback /secret/path.jsonl' } },
+          sample.status,
+        ),
+      )
+      const client = new AgentHttpClient({ fetchImpl })
+      const method =
+        sample.code === 'invalid_resume' || sample.code === 'session_exists'
+          ? client.createSession('session_fixture_1')
+          : sample.code === 'history_not_found' || sample.code === 'history_unavailable'
+            ? client.readSessionHistoryEvents('session_fixture_1')
+            : client.listSessionHistory()
+      await expect(method).rejects.toMatchObject({
+        status: sample.status,
+        code: sample.code,
+        message: sample.message,
+      })
+      await expect(method).rejects.toSatisfy((error: unknown) => {
+        return error instanceof AgentApiError && !error.message.includes('private') && !error.message.includes('/secret')
+      })
+    }
+
+    const unknown = new AgentHttpClient({
+      fetchImpl: vi.fn(async () =>
+        jsonResponse({ error: { code: 'mystery_code', message: 'DROP TABLE sessions' } }, 500),
+      ),
+    })
+    await expect(unknown.listSessionHistory()).rejects.toMatchObject({
+      code: 'invalid_history_limit',
+      message: 'Agent 服务请求失败',
+    })
+    await expect(unknown.listSessionHistory()).rejects.toSatisfy((error: unknown) => {
+      return error instanceof AgentApiError && !error.message.includes('DROP TABLE')
+    })
+  })
+
+  it('degrades truncated, unknown, and bad diagnostics from live history responses', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/events')) {
+        return jsonResponse({
+          session_id: 'session_fixture_1',
+          events: [
+            fixture.history.events.events[0],
+            { schema_version: 99, sequence: 2, payload: {} },
+            {
+              ...fixture.history.events.events[1],
+              sequence: 3,
+              payload: fixture.history.truncated_payload,
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+          diagnostics: [{ code: 'incomplete_tail', message: 'tail' }, 'bad'],
+        })
+      }
+      return jsonResponse({
+        sessions: [
+          fixture.history.list.sessions[0],
+          { session_id: '../outside' },
+          { first_user_message: { text: 'orphan' } },
+        ],
+        next_cursor: null,
+        extra: true,
+      })
+    })
+    const client = new AgentHttpClient({ fetchImpl })
+    const listing = await client.listSessionHistory()
+    expect(listing.sessions).toHaveLength(1)
+    expect(listing.sessions[0]?.session_id).toBe('session_fixture_1')
+
+    const events = await client.readSessionHistoryEvents('session_fixture_1')
+    expect(events.events.map((event) => event.sequence)).toEqual([1, 3])
+    expect(events.events[1]?.payload).toMatchObject({ truncated: true, head: 'head-preview' })
+    expect(events.has_more).toBe(false)
+    expect(events.next_cursor).toBeNull()
+  })
+})

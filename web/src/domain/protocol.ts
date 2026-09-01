@@ -46,8 +46,25 @@ export interface HealthResponse {
   readonly protocol_version: typeof PROTOCOL_VERSION
 }
 
+declare const transportSessionIdBrand: unique symbol
+declare const canonicalSessionIdBrand: unique symbol
+
+/** Opaque adapter-held session ID. Never mix with canonical/history `session_id`. */
+export type TransportSessionId = string & { readonly [transportSessionIdBrand]: 'transport' }
+
+/** Backend envelope / history session ID (`session_...`). Never mix with transport IDs. */
+export type CanonicalSessionId = string & { readonly [canonicalSessionIdBrand]: 'canonical' }
+
+export function asTransportSessionId(value: string): TransportSessionId {
+  return value as TransportSessionId
+}
+
+export function asCanonicalSessionId(value: string): CanonicalSessionId {
+  return value as CanonicalSessionId
+}
+
 export interface SessionCreatedResponse {
-  readonly transport_session_id: string
+  readonly transport_session_id: TransportSessionId
   readonly state: RuntimeState
   readonly cursor: number
 }

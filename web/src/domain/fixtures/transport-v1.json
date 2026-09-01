@@ -88,5 +88,127 @@
       "code": "session_closed",
       "message": "transport session is closed"
     }
+  ],
+  "history": {
+    "list": {
+      "sessions": [
+        {
+          "session_id": "session_fixture_1",
+          "first_user_message": {
+            "text": "请检查失败测试",
+            "truncated": false,
+            "original_length": 21,
+            "limit": 4096,
+            "encoding": "utf-8"
+          },
+          "created_at": "2026-09-01T08:00:00.000000Z",
+          "updated_at": "2026-09-01T08:01:00.000000Z",
+          "last_sequence": 4,
+          "last_state": "COMPLETED_TURN",
+          "resumable": true,
+          "diagnostics": []
+        }
+      ],
+      "next_cursor": "opaque_history_cursor_fixture_1"
+    },
+    "events": {
+      "session_id": "session_fixture_1",
+      "events": [
+        {
+          "schema_version": 1,
+          "session_id": "session_fixture_1",
+          "event_id": "event_fixture_1",
+          "agent_id": "agent_fixture_1",
+          "parent_agent_id": null,
+          "sequence": 1,
+          "type": "session_start",
+          "correlation_id": null,
+          "provider_tool_call_id": null,
+          "timestamp": "2026-08-31T08:00:00.123456Z",
+          "payload": { "state": "RUNNING" }
+        },
+        {
+          "schema_version": 1,
+          "session_id": "session_fixture_1",
+          "event_id": "event_fixture_2",
+          "agent_id": "agent_fixture_1",
+          "parent_agent_id": null,
+          "sequence": 2,
+          "type": "assistant_message",
+          "correlation_id": null,
+          "provider_tool_call_id": null,
+          "timestamp": "2026-08-31T08:00:00.223456Z",
+          "payload": {
+            "text": "done",
+            "new_field": { "preserve": true }
+          }
+        }
+      ],
+      "next_cursor": 2,
+      "has_more": true,
+      "diagnostics": []
+    },
+    "events_empty": {
+      "session_id": "session_fixture_1",
+      "events": [],
+      "next_cursor": null,
+      "has_more": false,
+      "diagnostics": []
+    },
+    "truncated_payload": {
+      "truncated": true,
+      "original_length": 123456,
+      "limit": 65536,
+      "encoding": "utf-8",
+      "head": "head-preview",
+      "tail": "tail-preview"
+    },
+    "resume": {
+      "request": {
+        "resume_session_id": "session_fixture_1"
+      },
+      "response": {
+        "transport_session_id": "transport_fixture_1",
+        "state": "RUNNING",
+        "cursor": 4
+      }
+    }
+  },
+  "history_errors": [
+    {
+      "status": 400,
+      "code": "invalid_history_id",
+      "message": "history session ID is invalid"
+    },
+    {
+      "status": 400,
+      "code": "invalid_history_cursor",
+      "message": "history cursor is invalid"
+    },
+    {
+      "status": 400,
+      "code": "invalid_history_limit",
+      "message": "history limit is invalid"
+    },
+    {
+      "status": 404,
+      "code": "history_not_found",
+      "message": "session history was not found"
+    },
+    {
+      "status": 422,
+      "code": "history_unavailable",
+      "message": "session history is unavailable"
+    },
+    {
+      "status": 422,
+      "code": "invalid_resume",
+      "message": "session cannot be resumed"
+    },
+    {
+      "status": 409,
+      "code": "session_exists",
+      "message": "an active transport session already exists"
+    }
   ]
 }

@@ -25,10 +25,31 @@ export type {
   SessionState,
 } from './reducer'
 export {
+  parseBoundedText,
+  parseSessionEventPage,
+  parseSessionHistoryPage,
+  parseTruncatedPayloadPreview,
+  isCanonicalSessionId,
+  isHistoryEventLimit,
+  isHistoryListLimit,
+  isHistorySince,
+  isOpaqueHistoryListCursor,
+} from './history'
+export type {
+  BoundedText,
+  HistoryDiagnostic,
+  SessionEventPage,
+  SessionHistoryItem,
+  SessionHistoryPage,
+  TruncatedPayloadPreview,
+} from './history'
+export {
   BASE_PATH,
   PROTOCOL_VERSION,
   PUBLIC_EVENT_TYPES,
   RUNTIME_STATES,
+  asCanonicalSessionId,
+  asTransportSessionId,
   isNonNegativeInteger,
   isPositiveSequence,
   isPublicEventType,
@@ -42,6 +63,7 @@ export type {
   AgentEventEnvelope,
   AgentEventStreamMessage,
   ApprovalResponseCommand,
+  CanonicalSessionId,
   CloseSessionCommand,
   EventType,
   EventEnvelope,
@@ -52,6 +74,7 @@ export type {
   SessionCreatedResponse,
   SessionStatusResponse,
   SubmitTaskCommand,
+  TransportSessionId,
 } from './protocol'
 export { projectTimeline } from './timeline'
 export type { TimelineItem, TimelineItemKind } from './timeline'

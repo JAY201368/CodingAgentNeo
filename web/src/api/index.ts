@@ -12,6 +12,8 @@ export type {
   AgentHttpClientOptions,
   ApiErrorCode,
   EventStreamHandlers,
+  ListSessionHistoryOptions,
+  ReadSessionHistoryEventsOptions,
 } from './client'
 export type {
   AcceptedResponse,
