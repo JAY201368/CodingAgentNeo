@@ -67,3 +67,9 @@
 - 选择：`HistorySidebar` 用 `safeDisplayText` + `{{ }}` 渲染 `first_user_message.text`，不把 `BoundedText` 放进选择按钮；`resumable===false` 的项保持可见并带「不可恢复」文字标记，点击不 emit `select`。错误态以 `error !== null` 为准，即使 `items` 非空也显示安全提示与「重试」。
 - 理由与替代：`BoundedText` 自带展开按钮，放进选择 `<button>` 会嵌套交互控件。不可恢复仍展示可避免用户以为列表丢了条目，但不 emit 可避免 T05 对不可恢复 ID 发起 resume。替代方案是复用 `BoundedText` 或对不可恢复项仍 emit 由父级拒绝，前者破坏语义，后者把防护推到接线层。
 - 后果：长摘要不在侧边栏内展开（T06 可用 CSS 截断）；T05 接线仍应只对 resumable 选择调用 `resumeSession`。诊断只展示 `code`，不渲染 `message`（避免路径泄漏）。最终 Codex 视觉与窄屏抽屉仍属 T06。
+
+## 2026-09-01 — T05：活跃 turn 确认用 `window.confirm`，标题走侧边栏 slot
+
+- 选择：T05 用 `window.confirm('将终结当前正在进行的工作并切换 session')` 落地可逆假设；`HistorySidebar` 增加可选 `title` slot，App 把 `h1#app-title` / eyebrow 投影进侧边栏，组件仍只渲染/emit。`session_exists` 在 resume 失败语境映射为「当前 session 已结束，请新建」，避免沿用创建态的「请关闭其他页面」。
+- 理由与替代：`window.confirm` 无额外 UI 框架、测试可 spy，后续可换成应用内对话框而不改 resume 顺序。title slot 避免 App 再包一层非语义 header，也不让侧边栏自己拥有文案/fetch。`session_exists` 在先 DELETE 后出现几乎总是切换窗口而非「别的页面还开着」。
+- 后果：确认取消不发 DELETE/resume；成功后只把 canonical history id 记为 `activeSessionId` 并刷新列表。窄屏抽屉、对比度与 Codex 信息层级仍留 T06。若产品改为「运行中禁止切换」或「无提示直接切换」，只需改 App 确认分支。

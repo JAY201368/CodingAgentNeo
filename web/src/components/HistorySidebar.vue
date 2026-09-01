@@ -78,6 +78,13 @@ function refresh(): void {
     aria-label="历史 session"
     :aria-busy="loading"
   >
+    <header
+      v-if="$slots.title"
+      class="history-sidebar__header"
+    >
+      <slot name="title" />
+    </header>
+
     <div
       v-if="error !== null"
       class="history-sidebar__error"

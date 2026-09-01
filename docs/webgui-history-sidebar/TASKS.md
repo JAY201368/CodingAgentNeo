@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Execute（T01–T04 已验收；其余任务串行派发中）
+> 状态：Execute（T01–T05 已验收；其余任务串行派发中）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -97,7 +97,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）：** 已交付展示型 `HistorySidebar`：按序渲染有界摘要，不可恢复项可见但不 emit select，switching 禁用选择，error !== null 即错误态并提供 refresh。无 v-html。主 Agent 复跑 lint/type-check/`test -- src/components`（20 passed）/build 通过。未改 App.vue。
 
-### [ ] T05 — 交付 sidebar + 右侧居中布局与恢复旅程接线
+### [x] T05 — 交付 sidebar + 右侧居中布局与恢复旅程接线
 
 **依赖：** T02, T04
 **范围：** 改造 `web/src/App.vue` 为「侧边栏 + 右侧居中主区」布局：把页面标题移到侧边栏顶部，挂载 `HistorySidebar`（数据来自 `useSessionHistory`），把 `select` 接到 `useAgentSession.resumeSession`，原有对话流、composer、授权、消息尾部动态入口迁移到右侧主区并居中。处理切换态、切换成功后历史消息重现、切换失败的安全错误与新建入口、活跃 turn 时的显式确认（见 DECISIONS 可逆假设）。排除最终视觉打磨与响应式细化（留 T06）。
@@ -111,6 +111,8 @@ flowchart TD
 - 新增/更新 App 级测试覆盖布局结构、select→resume 接线、切换态锁、成功重现、失败 fail-closed 与确认路径；既有 App 行为不回归。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test`；`npm --prefix web run build`。
+
+**完成摘要（2026-09-01）：** 已把 `App.vue` 改为侧边栏（含标题）+ 右侧居中主区；`select` 接到 `resumeSession`（canonical ID）；switching 锁定 composer；活跃 turn 一次 `window.confirm`；失败 fail-closed 并给出新建入口。主 Agent 复跑 lint/type-check/`test`（120 passed）/build 通过。窄屏抽屉与视觉打磨留 T06。
 
 ## 阶段 D：视觉、可访问性与交付
 

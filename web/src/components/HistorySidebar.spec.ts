@@ -61,6 +61,24 @@ function mountSidebar(
 }
 
 describe('HistorySidebar', () => {
+  it('renders an optional title slot inside the sidebar without fetching', () => {
+    const wrapper = mount(HistorySidebar, {
+      props: {
+        items: [],
+        loading: false,
+        error: null,
+        hasMore: false,
+        activeSessionId: null,
+        switching: false,
+      },
+      slots: {
+        title: '<p class="eyebrow">CodingAgentNeo</p><h1 id="app-title">CodingAgentNeo Web</h1>',
+      },
+    })
+    expect(wrapper.get('.history-sidebar__header #app-title').text()).toBe('CodingAgentNeo Web')
+    expect(wrapper.get('aside').element.contains(wrapper.get('#app-title').element)).toBe(true)
+  })
+
   it('renders summaries, timestamps, states, and resumable flags in list order', () => {
     const first = historyItem({
       session_id: 'session_fixture_1',
