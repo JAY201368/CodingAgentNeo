@@ -15,13 +15,23 @@ from fastapi.testclient import TestClient
 from tests.unit.fake_environment import FakeExecutionEnvironment
 from tests.unit.test_backend import ScriptedModel, wait_session
 
-from coding_agent_neo.assembly import build_agent_backend
+from coding_agent_neo.assembly import build_agent_backend_provider
 from coding_agent_neo.backend import (
     AgentCommand,
     ApprovalResponse,
     BackendClosedError,
+    BoundedText,
     CloseSession,
+    HistoryDiagnostic,
     Interrupt,
+    InvalidSessionHistoryCursorError,
+    InvalidSessionHistoryIdError,
+    InvalidSessionHistoryLimitError,
+    SessionEventPage,
+    SessionHistoryItem,
+    SessionHistoryNotFoundError,
+    SessionHistoryPage,
+    SessionHistoryUnavailableError,
     SubmitTask,
     TurnInProgressError,
 )
@@ -94,10 +104,69 @@ class FakeBackend:
         self.closed = True
 
 
+class FakeHistoryProvider:
+    """Provider-port fake for HTTP DTO/error mapping tests."""
+
+    def __init__(self, events: tuple[EventEnvelope, ...] = ()) -> None:
+        self.backend = FakeBackend(events)
+        self.backend.resume_last_sequence = 7
+        self.create_calls: list[str | None] = []
+        self.history = SessionHistoryPage(
+            sessions=(
+                SessionHistoryItem(
+                    session_id="session_history",
+                    first_user_message=BoundedText(
+                        text="remember",
+                        truncated=False,
+                        original_length=8,
+                        limit=4096,
+                    ),
+                    created_at="2026-09-01T00:00:00Z",
+                    updated_at="2026-09-01T00:00:01Z",
+                    last_sequence=7,
+                    last_state="COMPLETED_TURN",
+                    resumable=True,
+                    diagnostics=(
+                        HistoryDiagnostic(
+                            "incomplete_tail", "history has an incomplete final record"
+                        ),
+                    ),
+                ),
+            ),
+        )
+        self.events_page = SessionEventPage(
+            session_id="session_history",
+            events=(_event(1),),
+            diagnostics=(
+                HistoryDiagnostic("incomplete_tail", "history has an incomplete final record"),
+            ),
+        )
+        self.raise_error: BaseException | None = None
+
+    def list_sessions(self, *, cursor: str | None = None, limit: int = 50):
+        del cursor, limit
+        if self.raise_error is not None:
+            raise self.raise_error
+        return self.history
+
+    def read_session_events(self, session_id: str, *, since: int = 0, limit: int = 200):
+        del session_id, since, limit
+        if self.raise_error is not None:
+            raise self.raise_error
+        return self.events_page
+
+    def create_session(self, *, resume_session_id: str | None = None):
+        self.create_calls.append(resume_session_id)
+        if self.raise_error is not None:
+            raise self.raise_error
+        return self.backend
+
+
 @pytest.fixture
 def backend_and_client():
-    backend = FakeBackend((_event(1), _event(2, "unknown_future_event")))
-    app = create_app(lambda *, interactive: backend, keepalive_seconds=0.02)
+    provider = FakeHistoryProvider((_event(1), _event(2, "unknown_future_event")))
+    backend = provider.backend
+    app = create_app(provider, keepalive_seconds=0.02)
     with TestClient(app) as client:
         yield backend, client
 
@@ -106,6 +175,11 @@ def _session_id(client: TestClient) -> str:
     response = client.post("/api/v1/sessions", json={})
     assert response.status_code == 201
     return response.json()["transport_session_id"]
+
+
+def test_http_composition_rejects_callable_backend_dependency() -> None:
+    with pytest.raises(TypeError, match="provider must implement AgentBackendProvider"):
+        create_app(lambda **_kwargs: FakeBackend())
 
 
 def _frames(text: str) -> list[dict[str, object]]:
@@ -126,6 +200,138 @@ def _frames(text: str) -> list[dict[str, object]]:
     if current:
         frames.append(current)
     return frames
+
+
+def test_finite_history_routes_map_provider_dtos_and_resume_cursor() -> None:
+    provider = FakeHistoryProvider()
+    app = create_app(provider)
+    with TestClient(app) as client:
+        listing = client.get("/api/v1/session-history?limit=1")
+        assert listing.status_code == 200
+        assert listing.json() == {
+            "sessions": [provider.history.sessions[0].to_dict()],
+            "next_cursor": None,
+        }
+
+        events = client.get("/api/v1/session-history/session_history/events?since=0&limit=1")
+        assert events.status_code == 200
+        assert events.json() == provider.events_page.to_dict()
+
+        created = client.post("/api/v1/sessions", content=b"")
+        assert created.status_code == 201
+        assert created.json()["cursor"] == 0
+        transport_id = created.json()["transport_session_id"]
+        conflict = client.post(
+            "/api/v1/sessions",
+            json={"resume_session_id": "session_history"},
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "session_exists"
+        assert provider.create_calls == [None]
+        assert client.delete(f"/api/v1/sessions/{transport_id}").status_code == 204
+
+        resumed = client.post(
+            "/api/v1/sessions",
+            json={"resume_session_id": "session_history"},
+        )
+        assert resumed.status_code == 201
+        assert resumed.json()["cursor"] == 7
+        assert provider.create_calls == [None, "session_history"]
+        assert (
+            client.delete(f"/api/v1/sessions/{resumed.json()['transport_session_id']}").status_code
+            == 204
+        )
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code"),
+    (
+        (InvalidSessionHistoryIdError, 400, "invalid_history_id"),
+        (InvalidSessionHistoryCursorError, 400, "invalid_history_cursor"),
+        (InvalidSessionHistoryLimitError, 400, "invalid_history_limit"),
+        (SessionHistoryNotFoundError, 404, "history_not_found"),
+        (SessionHistoryUnavailableError, 422, "history_unavailable"),
+    ),
+)
+def test_history_provider_errors_have_stable_codes(error, status: int, code: str) -> None:
+    provider = FakeHistoryProvider()
+    provider.raise_error = error()
+    with TestClient(create_app(provider)) as client:
+        response = client.get("/api/v1/session-history")
+        assert response.status_code == status
+        assert response.json()["error"]["code"] == code
+        assert "traceback" not in response.text.casefold()
+        assert "history" in response.json()["error"]["message"]
+
+
+def test_session_body_rejects_extra_and_path_fields_without_provider_call() -> None:
+    provider = FakeHistoryProvider()
+    with TestClient(create_app(provider)) as client:
+        for body in (
+            {"resume_session_id": "session_history", "path": "/private/secret"},
+            {"path": "/private/secret"},
+            {"resume_session_id": "../outside"},
+            ["session_history"],
+        ):
+            response = client.post("/api/v1/sessions", json=body)
+            assert response.status_code == 400
+            assert response.json()["error"]["code"] in {
+                "invalid_session_request",
+                "invalid_history_id",
+            }
+            assert "/private/secret" not in response.text
+        assert provider.create_calls == []
+
+
+@pytest.mark.parametrize("error", (SessionHistoryNotFoundError, SessionHistoryUnavailableError))
+def test_resume_provider_failures_use_invalid_resume(error) -> None:
+    provider = FakeHistoryProvider()
+    provider.raise_error = error()
+    with TestClient(create_app(provider)) as client:
+        response = client.post(
+            "/api/v1/sessions",
+            json={"resume_session_id": "session_history"},
+        )
+        assert response.status_code == 422
+        assert response.json() == {
+            "error": {"code": "invalid_resume", "message": "session cannot be resumed"}
+        }
+
+
+def test_history_unknown_internal_errors_are_safe() -> None:
+    provider = FakeHistoryProvider()
+    provider.raise_error = RuntimeError("private provider payload and traceback")
+    with TestClient(create_app(provider)) as client:
+        response = client.get("/api/v1/session-history")
+        assert response.status_code == 500
+        assert response.json() == {
+            "error": {
+                "code": "internal_error",
+                "message": "the Agent service could not complete the request",
+            }
+        }
+        assert "private" not in response.text
+        assert "traceback" not in response.text.casefold()
+
+
+def test_finite_history_routes_reject_request_bodies() -> None:
+    provider = FakeHistoryProvider()
+    with TestClient(create_app(provider)) as client:
+        listing = client.request(
+            "GET",
+            "/api/v1/session-history",
+            content=b'{"path":"/private/secret"}',
+        )
+        events = client.request(
+            "GET",
+            "/api/v1/session-history/session_history/events",
+            content=b'{"filename":"/private/secret.jsonl"}',
+        )
+        for response in (listing, events):
+            assert response.status_code == 400
+            assert response.json()["error"]["code"] == "invalid_session_request"
+            assert "/private/secret" not in response.text
+        assert provider.create_calls == []
 
 
 def test_health_session_state_and_single_active_registry(backend_and_client) -> None:
@@ -360,8 +566,9 @@ def test_sse_reconnects_reuse_one_session_pump_and_leave_agent_untouched() -> No
 
 
 def test_close_command_is_delivered_once_and_closes_asynchronously() -> None:
-    backend = FakeBackend()
-    app = create_app(lambda *, interactive: backend, keepalive_seconds=0.02)
+    provider = FakeHistoryProvider()
+    backend = provider.backend
+    app = create_app(provider, keepalive_seconds=0.02)
     with TestClient(app) as client:
         transport_id = _session_id(client)
         response = client.post(
@@ -380,27 +587,22 @@ def test_close_command_is_delivered_once_and_closes_asynchronously() -> None:
 def test_http_path_injects_shared_backend_service_without_in_process_adapter(tmp_path) -> None:
     config = AppConfig(
         workspace=tmp_path,
-        session_dir=tmp_path / "sessions",
         api_key="placeholder",
         context_window=8000,
         reserved_output_tokens=1000,
     )
     model = ScriptedModel([NormalizedAssistantResponse(text="service response")])
-    factory_calls: list[bool] = []
+    provider = build_agent_backend_provider(
+        config,
+        interactive=True,
+        model_client=model,
+        environment=FakeExecutionEnvironment(),
+        worker_shutdown_timeout_seconds=2.0,
+        event_poll_timeout_seconds=0.05,
+        fsync=False,
+    )
 
-    def factory(config_value, *, interactive):
-        factory_calls.append(interactive)
-        return build_agent_backend(
-            config_value,
-            interactive=interactive,
-            model_client=model,
-            environment=FakeExecutionEnvironment(),
-            worker_shutdown_timeout_seconds=2.0,
-            event_poll_timeout_seconds=0.05,
-            fsync=False,
-        )
-
-    app = create_app(factory, config=config, close_timeout_seconds=2.0)
+    app = create_app(provider, close_timeout_seconds=2.0)
     with TestClient(app) as client:
         transport_id = _session_id(client)
         response = client.post(
@@ -410,5 +612,5 @@ def test_http_path_injects_shared_backend_service_without_in_process_adapter(tmp
         assert response.status_code == 202
         events = wait_session(tmp_path, lambda event: event.type == "turn_end")
         assert events[-1].payload["assistant_text"] == "service response"
+        assert list((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
         assert client.delete(f"/api/v1/sessions/{transport_id}").status_code == 204
-    assert factory_calls == [True]

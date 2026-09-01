@@ -22,7 +22,6 @@ from coding_agent_neo.models import EventType, NormalizedAssistantResponse, Runt
 def config(tmp_path: Path, **changes) -> AppConfig:
     values = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "context_window": 8000,
         "reserved_output_tokens": 1000,

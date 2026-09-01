@@ -28,7 +28,6 @@ class AppConfig:
     api_base: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
     workspace: Path = Path(".")
-    session_dir: Path = Path(".coding-agent-neo/sessions")
     approval_mode: str = "ask"
     max_steps: int = 32
     max_tool_calls: int = 64
@@ -53,7 +52,7 @@ _INT_FIELDS = frozenset(
     }
 )
 _FLOAT_FIELDS = frozenset({"max_wall_seconds", "command_timeout"})
-_PATH_FIELDS = frozenset({"workspace", "session_dir"})
+_PATH_FIELDS = frozenset({"workspace"})
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -74,6 +73,8 @@ def _read_toml(path: Path) -> dict[str, Any]:
 
 
 def _environment_values(environ: Mapping[str, str]) -> dict[str, str]:
+    if f"{ENV_PREFIX}SESSION_DIR" in environ:
+        raise ConfigError("configuration contains an unknown option")
     values: dict[str, str] = {}
     for name in _CONFIG_FIELDS:
         key = f"{ENV_PREFIX}{name.upper()}"

@@ -32,11 +32,11 @@ printf '%s\n' "find and fix the failing test" | coding-agent-neo --approval-mode
 coding-agent-neo                       # interactive task and follow-up prompts
 ```
 
-In one-shot mode, the final assistant text is written to stdout while event/status diagnostics are written to stderr. Interactive prompts and events use stdout. Exit codes are: `0` completed, `1` startup/runtime `FAILED`, `2` command usage or configuration failure, `3` `LIMIT_REACHED`, and `130` `INTERRUPTED`. A session JSONL file is created below `session_dir` once execution begins.
+In one-shot mode, the final assistant text is written to stdout while event/status diagnostics are written to stderr. Interactive prompts and events use stdout. Exit codes are: `0` completed, `1` startup/runtime `FAILED`, `2` command usage or configuration failure, `3` `LIMIT_REACHED`, and `130` `INTERRUPTED`. A session JSONL file is created below `<workspace>/.coding-agent-neo/sessions/` once execution begins.
 
-With non-interactive `ask`, bash is immediately denied and stdin is never consumed for approval; choose `--approval-mode auto` or `--yolo` for explicitly unattended bash execution. Never put a key value in source, arguments, tracked configuration, or session files. `--resume <session_id>` (or a JSONL path) continues a linear session without replaying historical tool side effects.
+With non-interactive `ask`, bash is immediately denied and stdin is never consumed for approval; choose `--approval-mode auto` or `--yolo` for explicitly unattended bash execution. Never put a key value in source, arguments, tracked configuration, or session files. `--resume <session_id>` continues a linear session without replaying historical tool side effects.
 
-Adapter implementers use the versioned [Agent backend interface specification](docs/agent-backend-interface.md) as the internal command, event, cursor, approval, and lifecycle authority. Frontends use only their corresponding binding in the [Agent adapter interface specification](docs/agent-transport-interface.md). The CLI obtains the explicit `InProcessAdapter` through `build_in_process_adapter`; the shared runtime is `AgentBackendService` from `build_agent_backend`.
+Adapter implementers use the versioned [Agent backend interface specification](docs/agent-backend-interface.md) as the internal command, event, cursor, approval, history, and lifecycle authority. Frontends use only their corresponding binding in the [Agent adapter interface specification](docs/agent-transport-interface.md). Controlled Python callers obtain the canonical workspace binding with `build_in_process_workspace_binding`, list or read bounded history, then call `create_session(resume_session_id=...)`; the CLI compatibility facade `build_in_process_adapter` follows that same provider path. The HTTP composition root uses `build_agent_backend_provider`, and its history reads are finite JSON rather than SSE.
 
 ## Local runtime modes
 
@@ -56,8 +56,8 @@ coding-agent-neo-http --config .coding-agent-neo.toml
 This is an API-only process. It listens on `127.0.0.1:8765` by default (use
 `--port` for another local port), has one active transport session, and does
 not serve Web assets. Stop it with Ctrl+C. The process reads the model,
-workspace, approval mode, session directory and API key from its Agent-side
-configuration; browser requests cannot supply or read those values.
+workspace, approval mode and API key from its Agent-side configuration; browser
+requests cannot supply or read those values.
 
 For Web development, run the Agent HTTP service above and start Vite in a
 second process. Vite forwards only `/api` to the loopback Agent service, so the

@@ -29,7 +29,6 @@ from coding_agent_neo.session import read_session
 def config(tmp_path: Path, **changes) -> AppConfig:
     values = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "context_window": 8000,
         "reserved_output_tokens": 1000,
@@ -87,7 +86,9 @@ def test_interactive_approval_roundtrip_persists_request_before_execution(tmp_pa
         backend_factory=backend_factory_for(model, environment),
     )
     assert code == EXIT_SUCCESS
-    events = read_session(next((tmp_path / "sessions").glob("*.jsonl"))).events
+    events = read_session(
+        next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
+    ).events
     types = [event.type for event in events]
     request_index = types.index(EventType.APPROVAL_REQUEST)
     decision_index = types.index(EventType.POLICY_DECISION)
@@ -116,7 +117,9 @@ def test_rejected_approval_shares_correlation_and_skips_environment(tmp_path: Pa
         backend_factory=backend_factory_for(model, environment),
     )
     assert code == EXIT_SUCCESS
-    events = read_session(next((tmp_path / "sessions").glob("*.jsonl"))).events
+    events = read_session(
+        next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
+    ).events
     request = next(event for event in events if event.type == EventType.APPROVAL_REQUEST)
     decision = next(event for event in events if event.type == EventType.POLICY_DECISION)
     assert str(decision.correlation_id) == str(request.correlation_id)
@@ -138,7 +141,9 @@ def test_last_state_drives_interrupted_exit_contract(tmp_path: Path) -> None:
         ),
     )
     assert code == EXIT_INTERRUPTED
-    events = read_session(next((tmp_path / "sessions").glob("*.jsonl"))).events
+    events = read_session(
+        next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
+    ).events
     assert events[-1].payload["state"] == RuntimeState.INTERRUPTED
 
 

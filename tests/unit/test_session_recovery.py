@@ -11,6 +11,7 @@ from tests.unit.fake_environment import FakeExecutionEnvironment
 
 from coding_agent_neo.assembly import (
     SessionResumeError,
+    build_agent_backend_provider,
     build_local_backend,
     recover_session_plan,
 )
@@ -28,7 +29,7 @@ from coding_agent_neo.session import (
     SessionFormatError,
     discard_incomplete_tail,
     read_session,
-    resolve_resume_path,
+    resolve_session_path,
 )
 
 SHORT_POLL = 0.05
@@ -72,7 +73,6 @@ class RecordingLocalEnvironment(LocalExecutionEnvironment):
 def config(tmp_path: Path, **changes) -> AppConfig:
     values = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "approval_mode": "auto",
         "context_window": 8000,
@@ -99,7 +99,7 @@ def make_backend(tmp_path: Path, model, *, resume=None, environment=None, **chan
 def wait_session(tmp_path: Path, predicate, *, timeout: float = 3.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() <= deadline:
-        paths = list((tmp_path / "sessions").glob("*.jsonl"))
+        paths = list((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
         if paths:
             events = read_session(paths[0]).events
             if any(predicate(event) for event in events):
@@ -117,7 +117,7 @@ def run_session(tmp_path: Path, responses, *, environment=None, task: str = "fir
         wait_session(tmp_path, lambda event: event.type == EventType.TURN_END)
     finally:
         backend.close()
-    path = next((tmp_path / "sessions").glob("*.jsonl"))
+    path = next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
     return path, env, model
 
 
@@ -231,11 +231,80 @@ def minimal_session_records(**changes) -> list[dict]:
     ]
 
 
-def test_resolve_resume_path_accepts_session_id_and_explicit_file(tmp_path: Path) -> None:
-    session_dir = tmp_path / "sessions"
-    assert resolve_resume_path("session_abc", session_dir) == session_dir / "session_abc.jsonl"
-    explicit = tmp_path / "custom.jsonl"
-    assert resolve_resume_path(explicit, session_dir) == explicit
+def test_resolve_session_path_uses_only_fixed_workspace_directory(tmp_path: Path) -> None:
+    assert resolve_session_path("session_abc", tmp_path) == (
+        tmp_path / ".coding-agent-neo" / "sessions" / "session_abc.jsonl"
+    )
+    with pytest.raises(ValueError):
+        resolve_session_path(str(tmp_path / "custom.jsonl"), tmp_path)
+
+
+def _symlink_directory_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (NotImplementedError, OSError) as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+
+
+@pytest.mark.parametrize("component", (".coding-agent-neo", "sessions"))
+def test_new_backend_rejects_symlinked_session_component(
+    tmp_path: Path,
+    component: str,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-session-outside"
+    outside.mkdir()
+    root = tmp_path / ".coding-agent-neo"
+    if component == "sessions":
+        root.mkdir()
+        link = root / component
+    else:
+        link = root
+    _symlink_directory_or_skip(link, outside)
+
+    with pytest.raises(ValueError, match="symlink"):
+        resolve_session_path("session_new", tmp_path)
+    with pytest.raises(ConfigError, match="invalid"):
+        make_backend(
+            tmp_path,
+            ScriptedModel([]),
+            environment=FakeExecutionEnvironment(),
+        )
+
+    assert link.is_symlink()
+    assert not list(outside.rglob("*.jsonl"))
+
+
+@pytest.mark.parametrize("component", (".coding-agent-neo", "sessions"))
+def test_resume_rejects_symlinked_session_component(
+    tmp_path: Path,
+    component: str,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-resume-outside"
+    outside_sessions = outside / "sessions"
+    outside_sessions.mkdir(parents=True)
+    session_id = "session_symlinked"
+    outside_path = outside_sessions / f"{session_id}.jsonl"
+    write_records(outside_path, minimal_session_records(session_id=session_id))
+    before = outside_path.read_bytes()
+
+    root = tmp_path / ".coding-agent-neo"
+    if component == "sessions":
+        root.mkdir()
+        link = root / component
+    else:
+        link = root
+    _symlink_directory_or_skip(link, outside)
+
+    with pytest.raises(ConfigError, match="invalid"):
+        make_backend(
+            tmp_path,
+            ScriptedModel([]),
+            resume=session_id,
+            environment=FakeExecutionEnvironment(),
+        )
+
+    assert link.is_symlink()
+    assert outside_path.read_bytes() == before
 
 
 def test_full_session_restores_ids_budget_tools_context_and_followup(tmp_path: Path) -> None:
@@ -253,7 +322,7 @@ def test_full_session_restores_ids_budget_tools_context_and_followup(tmp_path: P
     backend = make_backend(
         tmp_path,
         ScriptedModel([NormalizedAssistantResponse(text="follow-answer")]),
-        resume=path,
+        resume=path.stem,
         environment=fake,
     )
     try:
@@ -297,7 +366,7 @@ def test_full_session_restores_ids_budget_tools_context_and_followup(tmp_path: P
 
 
 def test_incomplete_tail_is_reported_ignored_and_does_not_block_resume(tmp_path: Path) -> None:
-    path = tmp_path / "sessions" / "session_resume1.jsonl"
+    path = tmp_path / ".coding-agent-neo" / "sessions" / "session_resume1.jsonl"
     write_records(path, minimal_session_records())
     complete = path.read_bytes()
     with path.open("ab") as handle:
@@ -312,7 +381,7 @@ def test_incomplete_tail_is_reported_ignored_and_does_not_block_resume(tmp_path:
     backend = make_backend(
         tmp_path,
         ScriptedModel([NormalizedAssistantResponse(text="after-tail")]),
-        resume=path,
+        resume=path.stem,
         environment=fake,
     )
     try:
@@ -396,13 +465,22 @@ def test_empty_file_and_missing_root_agent_fail(tmp_path: Path) -> None:
         make_backend(
             tmp_path,
             ScriptedModel([]),
-            resume="missing_session",
+            resume="session_missing",
+            environment=FakeExecutionEnvironment(),
+        )
+
+    with pytest.raises(ConfigError, match="invalid"):
+        make_backend(
+            tmp_path,
+            ScriptedModel([]),
+            resume=str(tmp_path / "outside.jsonl"),
             environment=FakeExecutionEnvironment(),
         )
 
 
 def test_compaction_restores_summary_and_later_complete_groups_only(tmp_path: Path) -> None:
-    path = tmp_path / "compacted.jsonl"
+    session_id = "session_compacted"
+    path = tmp_path / ".coding-agent-neo" / "sessions" / f"{session_id}.jsonl"
     records = [
         envelope(1, "session_start", {"state": "RUNNING"}),
         envelope(
@@ -484,6 +562,8 @@ def test_compaction_restores_summary_and_later_complete_groups_only(tmp_path: Pa
             },
         ),
     ]
+    for record in records:
+        record["session_id"] = session_id
     write_records(path, records)
     plan = recover_session_plan(path)
     assert plan.latest_summary == "Summarized earlier work."
@@ -506,7 +586,7 @@ def test_compaction_restores_summary_and_later_complete_groups_only(tmp_path: Pa
     backend = make_backend(
         tmp_path,
         ScriptedModel([NormalizedAssistantResponse(text="resumed")]),
-        resume=path,
+        resume=path.stem,
         environment=fake,
     )
     try:
@@ -536,7 +616,7 @@ def test_fake_environment_sees_no_historical_side_effects_during_resume(tmp_path
     backend = make_backend(
         tmp_path,
         ScriptedModel([NormalizedAssistantResponse(text="still here")]),
-        resume=path,
+        resume=path.stem,
         environment=fake,
     )
     try:
@@ -567,9 +647,8 @@ def test_local_environment_sees_no_historical_side_effects_during_resume(tmp_pat
     backend = make_backend(
         tmp_path,
         ScriptedModel([NormalizedAssistantResponse(text="still here")]),
-        resume=path,
+        resume=path.stem,
         environment=resumed,
-        workspace=workspace,
     )
     try:
         assert resumed.writes == []
@@ -584,9 +663,63 @@ def test_local_environment_sees_no_historical_side_effects_during_resume(tmp_pat
     assert (workspace / "note.txt").read_text(encoding="utf-8") == "hello"
 
 
+def test_assembled_provider_resume_continues_sequence_without_replaying_effects(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    first_environment = RecordingLocalEnvironment(workspace)
+    path, _first_environment, _model = run_session(
+        tmp_path,
+        [write_call("note.txt", "hello"), NormalizedAssistantResponse(text="wrote")],
+        environment=first_environment,
+        task="write a note",
+    )
+    original_events = read_session(path).events
+    last_sequence = original_events[-1].sequence
+    assert first_environment.writes == ["note.txt"]
+
+    resumed_environment = RecordingLocalEnvironment(workspace)
+    provider = build_agent_backend_provider(
+        config(tmp_path),
+        interactive=False,
+        model_client=ScriptedModel([NormalizedAssistantResponse(text="still here")]),
+        environment=resumed_environment,
+        worker_shutdown_timeout_seconds=SHORT_SHUTDOWN,
+        event_poll_timeout_seconds=SHORT_POLL,
+        fsync=False,
+    )
+    backend = provider.create_session(resume_session_id=path.stem)
+    try:
+        assert backend.resume_last_sequence == last_sequence
+        assert resumed_environment.writes == []
+        assert resumed_environment.commands == []
+        backend.send(SubmitTask("status"))
+        wait_session(
+            tmp_path,
+            lambda event: event.type == EventType.TURN_END and event.sequence > last_sequence,
+        )
+    finally:
+        backend.close()
+
+    events = read_session(path).events
+    assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+    follow_up = [event for event in events if event.sequence > last_sequence]
+    assert follow_up[0].sequence == last_sequence + 1
+    assert any(
+        event.type == EventType.USER_MESSAGE and event.payload.get("text") == "status"
+        for event in follow_up
+    )
+    assert any(event.type == EventType.TURN_END for event in follow_up)
+    assert resumed_environment.writes == []
+    assert resumed_environment.commands == []
+    assert (workspace / "note.txt").read_text(encoding="utf-8") == "hello"
+
+
 def test_interrupted_session_resumes_with_fresh_cancellation(tmp_path: Path) -> None:
-    path = tmp_path / "interrupted.jsonl"
-    records = minimal_session_records()
+    session_id = "session_interrupted"
+    path = tmp_path / ".coding-agent-neo" / "sessions" / f"{session_id}.jsonl"
+    records = minimal_session_records(session_id=session_id)
     records.append(
         envelope(
             6,
@@ -601,13 +734,14 @@ def test_interrupted_session_resumes_with_fresh_cancellation(tmp_path: Path) -> 
                     "output_tokens": 2,
                 },
             },
+            session_id=session_id,
         )
     )
     write_records(path, records)
     backend = make_backend(
         tmp_path,
         ScriptedModel([NormalizedAssistantResponse(text="ok")]),
-        resume=path,
+        resume=path.stem,
         environment=FakeExecutionEnvironment(),
     )
     try:

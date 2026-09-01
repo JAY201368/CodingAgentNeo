@@ -5,8 +5,10 @@ model = "your-model-name"
 api_base = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 workspace = "."
-session_dir = ".coding-agent-neo/sessions"
 approval_mode = "ask"
+
+# Session history always lives at <workspace>/.coding-agent-neo/sessions/.
+# The location is fixed; resume accepts only an opaque session ID.
 
 max_steps = 32
 max_tool_calls = 64

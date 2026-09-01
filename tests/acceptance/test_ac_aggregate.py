@@ -231,6 +231,11 @@ EVIDENCE: tuple[tuple[str, str, str], ...] = (
         "tests.architecture.test_forbidden_dependencies",
         "test_frontend_type_surface_does_not_name_agent_objects",
     ),
+    (
+        "AC-14",
+        "tests.architecture.test_forbidden_dependencies",
+        "test_adapters_use_only_public_ports_not_session_storage_or_assembly",
+    ),
 )
 
 

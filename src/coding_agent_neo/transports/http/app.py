@@ -1,9 +1,8 @@
 """Front-end-independent ASGI application for the Agent HTTP/SSE binding.
 
-Only the public ``AgentBackend`` port crosses this module's composition seam.
-The default production factory is supplied by ``http_cli.py``; tests and
-other embedders can inject any port-compatible backend factory without making
-the transport aware of the Agent Core or a particular frontend.
+Only the public ``AgentBackendProvider`` port crosses this module's
+composition seam.  The default production provider is supplied by
+``http_cli.py``; the transport itself never constructs or adapts a backend.
 """
 
 from __future__ import annotations
@@ -19,11 +18,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from coding_agent_neo.backend import (
+    AgentBackendProvider,
+    AgentBackendProviderError,
     BackendClosedError,
     CloseSession,
+    InvalidSessionHistoryCursorError,
+    InvalidSessionHistoryIdError,
+    InvalidSessionHistoryLimitError,
+    SessionHistoryNotFoundError,
+    SessionHistoryUnavailableError,
+    SessionResumeUnavailableError,
     TurnInProgressError,
 )
-from coding_agent_neo.backend_factory import AgentBackendFactory
 from coding_agent_neo.transports.http.commands import CommandDecodeError, decode_command
 from coding_agent_neo.transports.http.registry import (
     SessionExistsError,
@@ -35,16 +41,29 @@ from coding_agent_neo.transports.http.security import is_allowed_host, is_allowe
 from coding_agent_neo.transports.http.wire import (
     BASE_PATH,
     HEALTH_PATH,
+    HISTORY_EVENT_DEFAULT_LIMIT,
+    HISTORY_EVENT_MAX_LIMIT,
+    HISTORY_LIST_DEFAULT_LIMIT,
+    HISTORY_LIST_MAX_LIMIT,
     PROTOCOL_VERSION,
     AcceptedResponse,
     CursorError,
     HealthResponse,
+    HistoryCursorError,
+    HistoryIdError,
+    HistoryLimitError,
     SessionCreatedResponse,
     SessionStatusResponse,
     encode_keepalive,
     encode_sse,
     error_body,
+    event_page_to_dict,
     event_to_dict,
+    history_page_to_dict,
+    parse_history_id,
+    parse_history_limit,
+    parse_history_list_cursor,
+    parse_history_sequence,
     select_cursor,
 )
 
@@ -52,7 +71,22 @@ _DEFAULT_KEEPALIVE_SECONDS = 15.0
 _DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024
 _DEFAULT_CLOSE_TIMEOUT_SECONDS = 30.0
 _JSON_MEDIA_TYPE = "application/json"
-_CONFIG_MISSING = object()
+
+
+class _UnconfiguredProvider:
+    """Safe placeholder used when an embedder forgets to inject a provider."""
+
+    def list_sessions(self, *, cursor: str | None = None, limit: int = 50):
+        del cursor, limit
+        raise RuntimeError("Agent backend provider is not configured")
+
+    def read_session_events(self, session_id: str, *, since: int = 0, limit: int = 200):
+        del session_id, since, limit
+        raise RuntimeError("Agent backend provider is not configured")
+
+    def create_session(self, *, resume_session_id: str | None = None):
+        del resume_session_id
+        raise RuntimeError("Agent backend provider is not configured")
 
 
 def _json_error(status_code: int, code: str, message: str) -> JSONResponse:
@@ -69,6 +103,137 @@ def _safe_error(status_code: int = 500) -> JSONResponse:
     return _json_error(
         status_code, "internal_error", "the Agent service could not complete the request"
     )
+
+
+def _finite_json_response(content: Any, *, status_code: int = 200) -> Response:
+    """Return one bounded JSON response without leaking serialization errors."""
+
+    try:
+        payload = json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError, json.JSONDecodeError):
+        return _safe_error()
+    # The provider enforces this bound; retaining the final transport guard
+    # keeps a malformed test/embedded provider from emitting an unbounded page.
+    if len(payload) > 8 * 1024 * 1024:
+        return _safe_error()
+    return Response(content=payload, status_code=status_code, media_type=_JSON_MEDIA_TYPE)
+
+
+def _provider_error(error: AgentBackendProviderError, *, resume: bool = False) -> JSONResponse:
+    """Map typed provider errors to the documented stable wire response."""
+
+    if isinstance(error, InvalidSessionHistoryIdError):
+        return _json_error(400, "invalid_history_id", "history session ID is invalid")
+    if isinstance(error, InvalidSessionHistoryCursorError):
+        return _json_error(400, "invalid_history_cursor", "history cursor is invalid")
+    if isinstance(error, InvalidSessionHistoryLimitError):
+        return _json_error(400, "invalid_history_limit", "history limit is invalid")
+    if isinstance(error, SessionHistoryNotFoundError):
+        if resume:
+            return _json_error(422, "invalid_resume", "session cannot be resumed")
+        return _json_error(404, "history_not_found", "session history was not found")
+    if isinstance(error, SessionResumeUnavailableError):
+        return _json_error(422, "invalid_resume", "session cannot be resumed")
+    if isinstance(error, SessionHistoryUnavailableError):
+        if resume:
+            return _json_error(422, "invalid_resume", "session cannot be resumed")
+        return _json_error(422, "history_unavailable", "session history is unavailable")
+    return _safe_error()
+
+
+def _query_values(request: Request, name: str) -> list[str]:
+    values = request.query_params.getlist(name)
+    return [value for value in values if isinstance(value, str)]
+
+
+def _history_query(
+    request: Request,
+    *,
+    event: bool,
+) -> tuple[str | None, int, int] | tuple[str, int, int]:
+    """Decode one strict bounded history query without inspecting paths."""
+
+    allowed = {"since", "limit"} if event else {"cursor", "limit"}
+    unknown = set(request.query_params.keys()) - allowed
+    if unknown:
+        if unknown & {"path", "filename", "session_dir"}:
+            raise HistoryIdError
+        raise HistoryCursorError
+
+    limit_values = _query_values(request, "limit")
+    if len(limit_values) > 1:
+        raise HistoryLimitError
+    limit = parse_history_limit(
+        limit_values[0] if limit_values else None,
+        default=HISTORY_EVENT_DEFAULT_LIMIT if event else HISTORY_LIST_DEFAULT_LIMIT,
+        maximum=HISTORY_EVENT_MAX_LIMIT if event else HISTORY_LIST_MAX_LIMIT,
+    )
+    if event:
+        since_values = _query_values(request, "since")
+        if len(since_values) > 1:
+            raise HistoryCursorError
+        return None, parse_history_sequence(since_values[0] if since_values else None), limit
+    cursor_values = _query_values(request, "cursor")
+    if len(cursor_values) > 1:
+        raise HistoryCursorError
+    return parse_history_list_cursor(cursor_values[0] if cursor_values else None), 0, limit
+
+
+class _SessionRequestError(ValueError):
+    """The POST session body is not one of the documented request shapes."""
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _SessionRequestError
+        result[key] = value
+    return result
+
+
+async def _read_session_request(request: Request, *, max_bytes: int) -> str | None:
+    """Decode empty/new/resume session bodies with no path-bearing input."""
+
+    body = await request.body()
+    if not body:
+        return None
+    if len(body) > max_bytes:
+        raise _SessionRequestError
+    try:
+        value = json.loads(
+            body,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=lambda _value: (_ for _ in ()).throw(_SessionRequestError),
+        )
+    except _SessionRequestError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+        raise _SessionRequestError from error
+    if not isinstance(value, dict):
+        raise _SessionRequestError
+    if not value:
+        return None
+    if set(value) != {"resume_session_id"}:
+        raise _SessionRequestError
+    resume_session_id = value["resume_session_id"]
+    try:
+        return parse_history_id(resume_session_id)
+    except HistoryIdError as error:
+        raise error
+
+
+async def _ensure_empty_history_body(request: Request) -> None:
+    """Reject body-bearing finite-history requests before provider access."""
+
+    body = await request.body()
+    if body:
+        raise _SessionRequestError
 
 
 async def _read_json(request: Request, *, max_bytes: int, allow_empty: bool = False) -> Any:
@@ -160,10 +325,8 @@ def _session_or_error(
 
 
 def create_app(
-    backend_factory: AgentBackendFactory | None = None,
+    provider: AgentBackendProvider | None = None,
     *,
-    factory: AgentBackendFactory | None = None,
-    config: Any = _CONFIG_MISSING,
     allowed_hosts: Iterable[str] | None = None,
     allowed_origins: Iterable[str] | None = None,
     keepalive_seconds: float = _DEFAULT_KEEPALIVE_SECONDS,
@@ -172,15 +335,17 @@ def create_app(
 ) -> FastAPI:
     """Create the standalone Agent API ASGI app.
 
-    ``backend_factory`` is intentionally required for session creation.  The
-    composition root (normally :func:`http_cli.run_server`) supplies the
-    shared ``build_agent_backend`` factory; the HTTP package itself never
-    imports a concrete backend service or another adapter.
+    The application accepts one workspace-scoped ``AgentBackendProvider``.
+    Omitting it leaves a safe placeholder that reports an unconfigured
+    provider when a session or history operation is requested.
     """
 
-    selected_factory = backend_factory if backend_factory is not None else factory
-    if backend_factory is not None and factory is not None:
-        raise TypeError("provide backend_factory or factory, not both")
+    if provider is None:
+        selected_provider: AgentBackendProvider = _UnconfiguredProvider()  # type: ignore[assignment]
+    elif isinstance(provider, AgentBackendProvider):
+        selected_provider = provider
+    else:
+        raise TypeError("provider must implement AgentBackendProvider")
     if (
         isinstance(keepalive_seconds, bool)
         or not isinstance(keepalive_seconds, (int, float))
@@ -210,17 +375,16 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
     )
-    registry_kwargs: dict[str, Any] = {"close_timeout_seconds": close_timeout_seconds}
-    if config is not _CONFIG_MISSING:
-        registry_kwargs["config"] = config
     registry = TransportSessionRegistry(
-        selected_factory if selected_factory is not None else _unconfigured_factory,
-        **registry_kwargs,
+        selected_provider,
+        close_timeout_seconds=close_timeout_seconds,
     )
     # Expose the seam for ASGI lifespan/tests without putting it in any wire
     # response.  It contains only the injected AgentBackend ports.
     app.state.transport_sessions = registry
     app.state.session_registry = registry
+    app.state.agent_backend_provider = selected_provider
+    app.state.backend_provider = selected_provider
 
     @app.middleware("http")
     async def security_middleware(request: Request, call_next):
@@ -237,17 +401,65 @@ def create_app(
     async def health() -> JSONResponse:
         return JSONResponse(HealthResponse().to_dict(), media_type=_JSON_MEDIA_TYPE)
 
+    @app.get(BASE_PATH + "/session-history")
+    async def session_history(request: Request) -> Response:
+        try:
+            cursor, _since, limit = _history_query(request, event=False)
+        except HistoryIdError:
+            return _json_error(400, "invalid_history_id", "history session ID is invalid")
+        except HistoryCursorError:
+            return _json_error(400, "invalid_history_cursor", "history cursor is invalid")
+        except HistoryLimitError:
+            return _json_error(400, "invalid_history_limit", "history limit is invalid")
+        try:
+            await _ensure_empty_history_body(request)
+        except _SessionRequestError:
+            return _json_error(400, "invalid_session_request", "session request is invalid")
+        try:
+            page = selected_provider.list_sessions(cursor=cursor, limit=limit)
+            return _finite_json_response(history_page_to_dict(page))
+        except AgentBackendProviderError as error:
+            return _provider_error(error)
+        except Exception:
+            return _safe_error()
+
+    @app.get(BASE_PATH + "/session-history/{session_id:path}/events")
+    async def session_history_events(request: Request, session_id: str) -> Response:
+        try:
+            selected_id = parse_history_id(session_id)
+        except HistoryIdError:
+            return _json_error(400, "invalid_history_id", "history session ID is invalid")
+        try:
+            _unused_cursor, since, limit = _history_query(request, event=True)
+        except HistoryIdError:
+            return _json_error(400, "invalid_history_id", "history session ID is invalid")
+        except HistoryCursorError:
+            return _json_error(400, "invalid_history_cursor", "history cursor is invalid")
+        except HistoryLimitError:
+            return _json_error(400, "invalid_history_limit", "history limit is invalid")
+        try:
+            await _ensure_empty_history_body(request)
+        except _SessionRequestError:
+            return _json_error(400, "invalid_session_request", "session request is invalid")
+        try:
+            page = selected_provider.read_session_events(selected_id, since=since, limit=limit)
+            return _finite_json_response(event_page_to_dict(page))
+        except AgentBackendProviderError as error:
+            return _provider_error(error)
+        except Exception:
+            return _safe_error()
+
     @app.post(BASE_PATH + "/sessions", status_code=201)
     async def create_session(request: Request) -> JSONResponse:
         try:
-            body = await _read_json(request, max_bytes=max_body_bytes, allow_empty=True)
-            if not isinstance(body, dict) or body:
-                raise CommandDecodeError("session body must be empty")
-        except CommandDecodeError:
+            resume_session_id = await _read_session_request(request, max_bytes=max_body_bytes)
+        except HistoryIdError:
+            return _json_error(400, "invalid_history_id", "history session ID is invalid")
+        except _SessionRequestError:
             return _json_error(400, "invalid_session_request", "session request is invalid")
         session = None
         try:
-            session = registry.create()
+            session = registry.create(resume_session_id=resume_session_id)
             response = SessionCreatedResponse(
                 session.transport_session_id,
                 session.state,
@@ -256,6 +468,8 @@ def create_app(
             return JSONResponse(response.to_dict(), status_code=201, media_type=_JSON_MEDIA_TYPE)
         except SessionExistsError:
             return _json_error(409, "session_exists", "an active transport session already exists")
+        except AgentBackendProviderError as error:
+            return _provider_error(error, resume=resume_session_id is not None)
         except Exception:
             if session is not None:
                 registry.close_session(
@@ -345,10 +559,6 @@ def create_app(
         return Response(status_code=204)
 
     return app
-
-
-def _unconfigured_factory(*_args: Any, **_kwargs: Any):
-    raise RuntimeError("Agent backend factory is not configured")
 
 
 # Names used by embedders in earlier prototypes remain aliases, while the

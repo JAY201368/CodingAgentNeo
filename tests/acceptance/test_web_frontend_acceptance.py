@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from tests.unit.fake_environment import EnvironmentCall, FakeExecutionEnvironment
 from tests.unit.test_backend import ScriptedModel, bash_call
 
-from coding_agent_neo.assembly import build_agent_backend
+from coding_agent_neo.assembly import build_agent_backend_provider
 from coding_agent_neo.config import AppConfig
 from coding_agent_neo.environment.base import RunCommandRequest
 from coding_agent_neo.models import (
@@ -46,13 +46,31 @@ pytestmark = pytest.mark.acceptance
 def _config(tmp_path: Path, **changes: Any) -> AppConfig:
     values: dict[str, Any] = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "context_window": 8_000,
         "reserved_output_tokens": 1_000,
     }
     values.update(changes)
     return AppConfig(**values)
+
+
+class _BackendProvider:
+    """Minimal provider fake for tests that exercise only live HTTP routes."""
+
+    def __init__(self, backend: Any) -> None:
+        self.backend = backend
+
+    def list_sessions(self, *, cursor: str | None = None, limit: int = 50):
+        del cursor, limit
+        raise AssertionError("live-route acceptance test must not read history")
+
+    def read_session_events(self, session_id: str, *, since: int = 0, limit: int = 200):
+        del session_id, since, limit
+        raise AssertionError("live-route acceptance test must not read history")
+
+    def create_session(self, *, resume_session_id: str | None = None):
+        del resume_session_id
+        return self.backend
 
 
 class SequencedEnvironment(FakeExecutionEnvironment):
@@ -77,22 +95,19 @@ class SequencedEnvironment(FakeExecutionEnvironment):
 
 def _app(tmp_path: Path, model: Any, environment: Any, **config_changes: Any):
     config = _config(tmp_path, **config_changes)
-
-    def factory(config_value: AppConfig, *, interactive: bool):
-        return build_agent_backend(
-            config_value,
-            interactive=interactive,
-            model_client=model,
-            environment=environment,
-            approval_timeout_seconds=2.0,
-            worker_shutdown_timeout_seconds=2.0,
-            event_poll_timeout_seconds=0.02,
-            fsync=False,
-        )
+    provider = build_agent_backend_provider(
+        config,
+        interactive=True,
+        model_client=model,
+        environment=environment,
+        approval_timeout_seconds=2.0,
+        worker_shutdown_timeout_seconds=2.0,
+        event_poll_timeout_seconds=0.02,
+        fsync=False,
+    )
 
     return create_app(
-        factory,
-        config=config,
+        provider,
         keepalive_seconds=0.02,
         close_timeout_seconds=2.0,
     )
@@ -461,7 +476,7 @@ def test_web_wire_preserves_unknown_and_truncated_payloads() -> None:
         ),
     )
     backend = CanonicalPayloadBackend(events)
-    app = create_app(lambda *, interactive: backend, keepalive_seconds=0.02)
+    app = create_app(_BackendProvider(backend), keepalive_seconds=0.02)
     with TestClient(app) as client:
         transport_id = _session_id(client)
         with client.stream(

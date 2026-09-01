@@ -5,8 +5,46 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from coding_agent_neo.backend import AgentBackend, AgentCommand
+from coding_agent_neo.backend import (
+    AgentBackend,
+    AgentBackendProvider,
+    AgentCommand,
+    SessionEventPage,
+    SessionHistoryPage,
+)
 from coding_agent_neo.models import EventEnvelope, RuntimeState
+
+
+class InProcessWorkspaceBinding:
+    """Expose one workspace provider through the controlled Python binding.
+
+    The workspace binding exists before a session is selected.  It delegates
+    history and session creation to the composition-owned provider and wraps
+    only the returned per-session port.  In particular, it never receives a
+    repository, session path, factory, or any other persistence/runtime
+    implementation object.
+    """
+
+    def __init__(self, provider: AgentBackendProvider) -> None:
+        self._provider = provider
+
+    def list_sessions(self, *, cursor: str | None = None, limit: int = 50) -> SessionHistoryPage:
+        """Return one bounded provider-owned history page."""
+
+        return self._provider.list_sessions(cursor=cursor, limit=limit)
+
+    def read_session_events(
+        self, session_id: str, *, since: int = 0, limit: int = 200
+    ) -> SessionEventPage:
+        """Return one bounded provider-owned event page."""
+
+        return self._provider.read_session_events(session_id, since=since, limit=limit)
+
+    def create_session(self, *, resume_session_id: str | None = None) -> InProcessAdapter:
+        """Create one new or resumed per-session binding through the provider."""
+
+        backend = self._provider.create_session(resume_session_id=resume_session_id)
+        return InProcessAdapter(backend)
 
 
 class InProcessAdapter:
@@ -62,4 +100,4 @@ class InProcessAdapter:
         self._backend.close()
 
 
-__all__ = ["InProcessAdapter"]
+__all__ = ["InProcessAdapter", "InProcessWorkspaceBinding"]
