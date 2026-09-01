@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：T01～T06 已验收；T07～T10 待串行实施
+> 状态：T01～T07 已验收；T08～T10 待串行实施
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -142,7 +142,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** 已交付按 canonical correlation ID 聚合的工具生命周期卡片、唯一 pending approval dialog、批准/拒绝单次锁和 RUNNING/WAITING Stop；只展示后端脱敏摘要与状态/耗时/退出码/超时/截断事实，不执行 tool/arguments。ApprovalResponse 202 后保持锁定直至匹配 `policy_decision`，Interrupt 202 后锁到结束边界；Escape、断线、unmount、空或不匹配 ID 均不产生批准，无效授权保留 Stop，普通 tool failure 不改写 session FAILED。主 Agent 复核：Web 39 passed、lint/type-check/build、Python adapter/backend/frontend 31 passed、静态安全与 diff check 均通过；Python 回环集成显式设置 `NO_PROXY/no_proxy=127.0.0.1,localhost`，仅有 Starlette 弃用警告。未执行真实模型、真实浏览器或公网部署，刷新重连与最终可访问性打磨留待 T07/T08。
 
-### [ ] T07 — 交付 follow-up、刷新重连与健壮事件消费
+### [x] T07 — 交付 follow-up、刷新重连与健壮事件消费
 
 **依赖:** T05
 **范围:** 完成成功 turn 后线性 follow-up、同进程刷新重连、SSE 有界退避、重复/跳号处理和显式结束。排除服务器重启后的历史 resume、按浏览器失联自动关闭、输入排队和并发 session。
@@ -156,6 +156,8 @@ flowchart TD
 - 显式结束或服务关闭后进入 closed/失联状态并禁止命令；unload 不作为关闭证据。
 
 **验证:** `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; `.venv/bin/python -m pytest tests/transports tests/integration/test_frontend_contract.py tests/integration/test_resume_cli.py`。
+
+**完成摘要（2026-09-01）:** 已交付同一 backend session 的线性 follow-up、刷新先 GET 校验 transport ID 再从浏览器最后成功 cursor 重订阅、仅 GET/SSE 的有限指数退避、跳号补回、陈旧 ID 清理及显式 DELETE 结束；POST 不重放，unmount 只停止 SSE。主审退回修正两处 fail-open 后，重新 attach 的 `RUNNING` 歧义快照在 canonical `turn_end/session_end` 前锁定新任务，且 `agent_end` 终止态立即优先禁止 Stop/提交。主 Agent 复核：Web 45 passed、lint/type-check/build、transport/frontend/resume Python 27 passed、卸载/安全与 diff 扫描均通过；回环测试显式设置 `NO_PROXY/no_proxy=127.0.0.1,localhost`，仅有 Starlette 弃用警告。服务器重启后的历史 resume、输入排队、并发 session、真实模型/浏览器/公网验证均未声称完成。
 
 ## 阶段 D：视觉、组合与交付
 

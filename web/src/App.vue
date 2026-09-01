@@ -32,6 +32,7 @@ const session = useAgentSession({
 const composer = ref<InstanceType<typeof TaskComposer> | null>(null)
 const actionError = ref<string | null>(null)
 const connecting = ref(false)
+const endingSession = ref(false)
 let connectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 
 const timelineItems = computed(() => projectTimeline(session.state.value.events))
@@ -46,6 +47,14 @@ const showWorkspace = computed(() =>
 )
 const canRetryConnection = computed(() =>
   session.state.value.connection === 'error' || session.state.value.connection === 'closed',
+)
+const hasResumeHint = computed(() => session.storedSession.value !== null)
+const streamRetryExhausted = computed(() => session.state.value.streamRetryExhausted === true)
+const showStreamRetry = computed(() =>
+  isConnected.value && !session.state.value.streamAvailable && streamRetryExhausted.value,
+)
+const showEndSession = computed(() =>
+  isConnected.value && session.gate.value.canClose && !endingSession.value,
 )
 const finalReply = computed(() =>
   session.state.value.finalAssistantText || session.state.value.latestAssistantText,
@@ -72,7 +81,12 @@ const connectionLabels: Record<string, string> = {
 }
 
 const statusLabel = computed(() => statusLabels[session.state.value.status] ?? '状态未知')
-const connectionLabel = computed(() => connectionLabels[session.state.value.connection] ?? '连接状态未知')
+const connectionLabel = computed(() => {
+  if (isConnected.value && !session.state.value.streamAvailable) {
+    return streamRetryExhausted.value ? '事件流已断开' : '事件流连接中…'
+  }
+  return connectionLabels[session.state.value.connection] ?? '连接状态未知'
+})
 const composerReason = computed(() => {
   const gate = session.gate.value
   if (gate.kind === 'completed_turn') {
@@ -117,7 +131,7 @@ function safeErrorMessage(error: unknown): string {
         return '当前 turn 正在运行，请等待结束后再提交。'
       case 'session_not_found':
       case 'session_closed':
-        return 'Agent session 已关闭或不存在，可以重新连接。'
+        return 'Agent session 已关闭或不存在，请新建一个本地 session。'
       case 'internal_error':
       case 'protocol_error':
         return 'Agent 服务暂时无法完成请求，请稍后重试。'
@@ -141,8 +155,7 @@ function handleFailure(error: unknown): void {
   actionError.value = safeErrorMessage(error)
   if (error instanceof AgentApiError &&
       (error.code === 'session_closed' || error.code === 'session_not_found')) {
-    session.stopEvents()
-    session.dispatch({ type: 'CLOSED' })
+    session.forgetSession()
   }
 }
 
@@ -165,10 +178,19 @@ function retryConnection(): void {
   if (connecting.value) {
     return
   }
-  // A new transport session starts a new display projection.  This is only
-  // offered after a failed/closed connection; terminal sessions remain locked.
+  // An existing storage hint must be queried again before any new session is
+  // created.  Only a missing/closed hint takes the explicit new-session path.
   session.stopEvents()
-  session.dispatch({ type: 'RESET' })
+  if (
+    session.state.value.connection === 'connected' &&
+    session.transportSessionId.value !== null
+  ) {
+    session.startEvents()
+    return
+  }
+  if (session.storedSession.value === null) {
+    session.dispatch({ type: 'RESET' })
+  }
   void connect()
 }
 
@@ -208,6 +230,23 @@ async function stopTurn(): Promise<void> {
     if (session.state.value.commandUncertain) {
       actionError.value = `${safeErrorMessage(error)} 中断结果未知，页面不会自动重试。`
     }
+  }
+}
+
+async function endSession(): Promise<void> {
+  if (endingSession.value) {
+    return
+  }
+  endingSession.value = true
+  actionError.value = null
+  try {
+    // DELETE is the explicit transport lifecycle operation.  It is never
+    // attached to component teardown, so browser teardown is not close evidence.
+    await session.deleteSession()
+  } catch (error) {
+    handleFailure(error)
+  } finally {
+    endingSession.value = false
   }
 }
 
@@ -280,10 +319,15 @@ onBeforeUnmount(() => {
       aria-labelledby="connection-title"
     >
       <h2 id="connection-title">
-        还没有可用的 session
+        {{ hasResumeHint ? '正在恢复已有 session' : '需要新建 session' }}
       </h2>
       <p>
-        可以确认 Agent HTTP 服务已在本机运行后重新连接。页面不会重放此前未确认的 POST 命令。
+        <template v-if="hasResumeHint">
+          页面会先查询本地保存的 transport ID，再从最后成功游标重新订阅；不会声称恢复已重启进程中的历史 session。
+        </template>
+        <template v-else>
+          可以确认 Agent HTTP 服务已在本机运行后创建一个新的 session。页面不会重放此前未确认的 POST 命令。
+        </template>
       </p>
       <button
         class="secondary-action"
@@ -324,6 +368,26 @@ onBeforeUnmount(() => {
           @click="stopTurn"
         >
           {{ interruptSubmitting ? '正在停止…' : '停止（Stop）' }}
+        </button>
+      </section>
+
+      <section
+        v-if="showStreamRetry"
+        class="connection-card"
+        aria-labelledby="stream-retry-title"
+      >
+        <h2 id="stream-retry-title">
+          事件流需要重新连接
+        </h2>
+        <p>
+          自动重连已达到有限次数；session 仍保持存活，页面没有自动重放任何命令。
+        </p>
+        <button
+          class="secondary-action"
+          type="button"
+          @click="retryConnection"
+        >
+          重新连接事件流
         </button>
       </section>
 
@@ -373,6 +437,27 @@ onBeforeUnmount(() => {
       </section>
 
       <Timeline :items="timelineItems" />
+
+      <section
+        v-if="showEndSession"
+        class="session-controls"
+        aria-labelledby="session-controls-title"
+      >
+        <div>
+          <h2 id="session-controls-title">
+            Session 生命周期
+          </h2>
+          <p>需要结束时显式关闭；浏览器离开页面不会自动发送关闭命令。</p>
+        </div>
+        <button
+          class="secondary-action"
+          type="button"
+          :disabled="endingSession"
+          @click="endSession"
+        >
+          {{ endingSession ? '正在结束…' : '结束 Session' }}
+        </button>
+      </section>
 
       <p
         v-if="hasDiagnostics"

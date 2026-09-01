@@ -337,4 +337,43 @@ describe('defensive event parser and reducer', () => {
     expect(state.status).not.toBe('FAILED')
     expect(commandGateFor(state).canSubmitTask).toBe(true)
   })
+
+  it('prioritizes terminal state after an ambiguous RUNNING reattach', () => {
+    let state = reduceSession(createInitialSessionState(), {
+      type: 'SESSION_ATTACHED',
+      transportSessionId: 'transport_fixture_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    state = reduceSession(state, {
+      type: 'EVENT',
+      event: {
+        ...fixture.events[3],
+        sequence: 1,
+        type: 'agent_end',
+        payload: { state: 'INTERRUPTED', reason: 'user_cancelled' },
+      },
+    })
+
+    expect(state.resumeStateAmbiguous).toBe(true)
+    expect(state.turnActive).toBe(true)
+    expect(commandGateFor(state)).toMatchObject({
+      kind: 'terminal',
+      canInterrupt: false,
+      canSubmitTask: false,
+    })
+
+    state = reduceSession(state, {
+      type: 'EVENT',
+      event: {
+        ...fixture.events[3],
+        sequence: 2,
+        type: 'session_end',
+        payload: { state: 'INTERRUPTED', reason: 'user_cancelled' },
+      },
+    })
+    expect(state.connection).toBe('closed')
+    expect(state.resumeStateAmbiguous).toBe(false)
+    expect(commandGateFor(state).kind).toBe('closed')
+  })
 })

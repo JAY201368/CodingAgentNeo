@@ -30,6 +30,8 @@ export interface SessionState {
   readonly status: RuntimeState
   readonly cursor: number
   readonly turnActive: boolean
+  /** A reattached RUNNING snapshot is ambiguous until a canonical boundary. */
+  readonly resumeStateAmbiguous: boolean
   readonly pendingApproval: PendingApproval | null
   readonly commandInFlight: AgentCommandType | null
   readonly commandUncertain: boolean
@@ -42,6 +44,8 @@ export interface SessionState {
   readonly finalAssistantText: string
   readonly diagnostics: readonly EventDiagnostic[]
   readonly needsResubscribe: boolean
+  /** Automatic GET/SSE retry reached its finite budget. */
+  readonly streamRetryExhausted?: boolean
   readonly lastError: string | null
 }
 
@@ -53,9 +57,17 @@ export type SessionAction =
       readonly cursor: number
       readonly state: RuntimeState
     }
+  | {
+      readonly type: 'SESSION_ATTACHED'
+      readonly transportSessionId: string
+      readonly cursor: number
+      readonly state: RuntimeState
+    }
   | { readonly type: 'EVENT'; readonly event: unknown }
+  | { readonly type: 'STREAM_OPENED' }
   | { readonly type: 'STREAM_ERROR'; readonly message: string }
   | { readonly type: 'STREAM_CLOSED' }
+  | { readonly type: 'STREAM_RETRY_EXHAUSTED'; readonly message: string }
   | { readonly type: 'COMMAND_STARTED'; readonly commandType: AgentCommandType }
   | { readonly type: 'COMMAND_ACCEPTED'; readonly commandType: AgentCommandType }
   | {
@@ -65,6 +77,7 @@ export type SessionAction =
       readonly uncertain?: boolean
     }
   | { readonly type: 'CLOSED' }
+  | { readonly type: 'SESSION_UNAVAILABLE'; readonly message: string }
   | { readonly type: 'RESET' }
 
 const MAX_RETAINED_EVENTS = 500
@@ -83,6 +96,7 @@ export function createInitialSessionState(
     status: 'RUNNING',
     cursor: safeCursor,
     turnActive: false,
+    resumeStateAmbiguous: false,
     pendingApproval: null,
     commandInFlight: null,
     commandUncertain: false,
@@ -93,6 +107,7 @@ export function createInitialSessionState(
     finalAssistantText: '',
     diagnostics: [],
     needsResubscribe: false,
+    streamRetryExhausted: false,
     lastError: null,
   }
 }
@@ -243,6 +258,7 @@ function applyKnownEvent(
         ...state,
         status: nextStatus,
         turnActive: false,
+        resumeStateAmbiguous: false,
         pendingApproval: null,
         commandInFlight: null,
         commandUncertain: false,
@@ -255,7 +271,11 @@ function applyKnownEvent(
         : {
             ...state,
             status: eventState,
-            turnActive: false,
+            // A reattached RUNNING snapshot is not unlocked by agent_end
+            // alone. The binding makes turn_end the only turn boundary;
+            // session_end is the lifecycle boundary that can close the
+            // remaining ambiguity when a history prefix is missing.
+            turnActive: state.resumeStateAmbiguous ? true : false,
             pendingApproval: null,
             commandInFlight: null,
             commandUncertain: false,
@@ -268,10 +288,12 @@ function applyKnownEvent(
           ? eventState
           : state.status,
         turnActive: false,
+        resumeStateAmbiguous: false,
         pendingApproval: null,
         commandInFlight: null,
         commandUncertain: false,
         streamAvailable: false,
+        streamRetryExhausted: false,
       }
     case 'error':
       // An error event is a process fact, not the turn boundary.  The status
@@ -335,9 +357,8 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
         ...state,
         connection: 'connecting',
         lastError: null,
-        commandInFlight: null,
-        commandUncertain: false,
         streamAvailable: false,
+        streamRetryExhausted: false,
       }
     case 'CONNECTED':
       return {
@@ -347,22 +368,68 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
         status: action.state,
         cursor: action.cursor,
         turnActive: false,
+        resumeStateAmbiguous: false,
         pendingApproval: null,
         commandInFlight: null,
         commandUncertain: false,
-        streamAvailable: true,
+        streamAvailable: false,
+        streamRetryExhausted: false,
+        lastError: null,
+      }
+    case 'SESSION_ATTACHED':
+      return {
+        ...state,
+        transportSessionId: action.transportSessionId,
+        connection: 'connected',
+        // The cursor belongs to the browser's last successfully consumed
+        // event.  A server status cursor is only a diagnostic and must never
+        // make the browser skip canonical events during re-attach.
+        cursor: Math.max(state.cursor, action.cursor),
+        status: action.state,
+        // A WAITING snapshot is sufficient evidence that a turn is active,
+        // even when the approval event predates this browser attachment. A
+        // RUNNING snapshot is ambiguous (it may be the initial no-turn state
+        // or an active turn), so fail closed until a canonical turn_end or
+        // session_end is consumed. Never infer activity from the server
+        // cursor.
+        turnActive: action.state === 'RUNNING' || action.state === 'WAITING_FOR_APPROVAL'
+          ? true
+          : state.turnActive,
+        resumeStateAmbiguous: action.state === 'RUNNING',
+        diagnostics: action.state === 'RUNNING'
+          ? diagnosticsWith(state.diagnostics, [{
+              code: 'invalid_field',
+              message: 'reattached RUNNING snapshot is ambiguous; follow-up remains locked until a canonical turn_end or session_end',
+            }])
+          : state.diagnostics,
+        streamAvailable: false,
+        needsResubscribe: false,
+        streamRetryExhausted: false,
         lastError: null,
       }
     case 'EVENT':
       return reduceEvent(state, action.event)
+    case 'STREAM_OPENED':
+      return state.connection === 'closed'
+        ? state
+        : {
+            ...state,
+            streamAvailable: true,
+            needsResubscribe: false,
+            streamRetryExhausted: false,
+            lastError: null,
+          }
     case 'STREAM_ERROR':
       return {
         ...state,
-        connection: state.transportSessionId === null || state.connection === 'connecting'
+        connection: state.connection === 'closed'
+          ? 'closed'
+          : state.transportSessionId === null || state.connection === 'connecting'
           ? 'error'
           : 'connected',
         lastError: action.message,
         streamAvailable: false,
+        streamRetryExhausted: false,
       }
     case 'STREAM_CLOSED':
       return state.connection === 'closed'
@@ -371,6 +438,22 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
             ...state,
             connection: state.transportSessionId === null ? 'error' : 'connected',
             streamAvailable: false,
+            streamRetryExhausted: false,
+          }
+    case 'STREAM_RETRY_EXHAUSTED':
+      return state.connection === 'closed'
+        ? state
+        : {
+            ...state,
+            // Exhausting the finite attachment budget means the browser can
+            // no longer safely issue commands against this transport.  Keep
+            // the opaque resume hint in the composable so a manual retry can
+            // query the same session before deciding whether a new one is
+            // needed.
+            connection: 'error',
+            streamAvailable: false,
+            streamRetryExhausted: true,
+            lastError: action.message,
           }
     case 'COMMAND_STARTED':
       return {
@@ -416,9 +499,19 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
         commandInFlight: null,
         commandUncertain: false,
         streamAvailable: false,
+        streamRetryExhausted: false,
         turnActive: false,
+        resumeStateAmbiguous: false,
         pendingApproval: null,
       }
+    case 'SESSION_UNAVAILABLE': {
+      const reset = createInitialSessionState()
+      return {
+        ...reset,
+        connection: 'error',
+        lastError: action.message,
+      }
+    }
     case 'RESET':
       return createInitialSessionState()
   }
@@ -473,16 +566,6 @@ export function commandGateFor(state: SessionState): CommandGate {
             : '等待唯一授权响应',
     }
   }
-  if (state.turnActive) {
-    return {
-      kind: 'turn_running',
-      canSubmitTask: false,
-      canRespondToApproval: false,
-      canInterrupt: state.commandInFlight === null,
-      canClose: true,
-      reason: state.commandInFlight === null ? 'turn 正在运行' : 'turn 命令仍在提交',
-    }
-  }
   if (isTerminalState(state.status)) {
     return {
       kind: 'terminal',
@@ -491,6 +574,26 @@ export function commandGateFor(state: SessionState): CommandGate {
       canInterrupt: false,
       canClose: true,
       reason: 'session 已进入终止状态',
+    }
+  }
+  if (state.resumeStateAmbiguous) {
+    return {
+      kind: 'turn_running',
+      canSubmitTask: false,
+      canRespondToApproval: false,
+      canInterrupt: state.commandInFlight === null,
+      canClose: true,
+      reason: '重新连接得到的 RUNNING 状态可能仍有未完成 turn；在收到 turn_end 或 session_end 前不能提交新任务。可使用 Stop 或结束 Session。',
+    }
+  }
+  if (state.turnActive) {
+    return {
+      kind: 'turn_running',
+      canSubmitTask: false,
+      canRespondToApproval: false,
+      canInterrupt: state.commandInFlight === null,
+      canClose: true,
+      reason: state.commandInFlight === null ? 'turn 正在运行' : 'turn 命令仍在提交',
     }
   }
   if (state.commandUncertain || state.commandInFlight !== null) {

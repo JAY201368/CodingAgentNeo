@@ -89,6 +89,8 @@ export interface AgentHttpClientOptions {
 }
 
 export interface EventStreamHandlers {
+  /** Called after the HTTP response and stream body have been validated. */
+  readonly onOpen?: () => void
   readonly onEvent?: (message: AgentEventStreamMessage) => void
 }
 
@@ -365,12 +367,19 @@ async function* sseMessages(
   const decoder = new TextDecoder()
   let buffer = ''
   const frame = { id: null as string | null, event: '', data: [] as string[] }
+  const cancelReader = (): void => {
+    void reader.cancel().catch(() => undefined)
+  }
+  signal?.addEventListener('abort', cancelReader, { once: true })
   try {
     while (true) {
       if (signal?.aborted) {
         throw new AgentRequestAbortedError()
       }
       const chunk = await reader.read()
+      if (signal?.aborted) {
+        throw new AgentRequestAbortedError()
+      }
       if (chunk.done) {
         buffer += decoder.decode()
         if (buffer.length > 0) {
@@ -409,6 +418,7 @@ async function* sseMessages(
       }
     }
   } finally {
+    signal?.removeEventListener('abort', cancelReader)
     try {
       await reader.cancel()
     } catch {
@@ -527,6 +537,7 @@ export class AgentHttpClient {
     transportSessionId: string,
     cursor = 0,
     signal?: AbortSignal,
+    onOpen?: () => void,
   ): AsyncGenerator<AgentEventStreamMessage> {
     const id = this.requireSessionId(transportSessionId)
     if (!isNonNegativeInteger(cursor)) {
@@ -547,6 +558,7 @@ export class AgentHttpClient {
     if (response.body === null) {
       throw new AgentProtocolError('SSE 响应缺少 event stream body')
     }
+    onOpen?.()
     yield* sseMessages(response.body, signal)
   }
 
@@ -556,7 +568,7 @@ export class AgentHttpClient {
     handlers: EventStreamHandlers = {},
     signal?: AbortSignal,
   ): Promise<void> {
-    for await (const message of this.events(transportSessionId, cursor, signal)) {
+    for await (const message of this.events(transportSessionId, cursor, signal, handlers.onOpen)) {
       handlers.onEvent?.(message)
     }
   }

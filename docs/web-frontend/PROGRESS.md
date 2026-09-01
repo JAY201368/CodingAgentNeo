@@ -9,23 +9,24 @@
 - T05 — 已将 session composable 接入 Vue 页面：自动创建 transport session、非空任务 composer、一次性提交锁、用户/assistant/运行/错误/结束事件的 sequence 时间线、`turn_end.assistant_text` 优先且回退最近 assistant 文本、COMPLETED_TURN follow-up 解锁与终止态锁定。长文本按安全纯文本有界展示并可展开；未知、缺失或截断 payload 降级为事实提示；tool failure 仅作运行事件展示，不改写为 session FAILED。HTTP 400/409/410 映射为安全可恢复提示，POST 不自动重放；新增 App/timeline 测试。2026-09-01 实测 Web lint、type-check、全量 test 24 passed、build；`.venv/bin/python -m pytest tests/transports tests/integration/test_frontend_contract.py` 在显式 `NO_PROXY/no_proxy=127.0.0.1,localhost` 下 19 passed（含真实 `AgentBackendService` + HTTP adapter 的 scripted fake 无授权 turn 到 `turn_end`），仅有 Starlette 第三方弃用警告。未执行真实模型网关、真实浏览器或公网部署；approval 操作、精细工具卡、刷新重连/退避和最终视觉仍不在本卡。
 - T06 — 已交付按 envelope `correlation_id` 聚合的工具生命周期卡片（工具/授权/策略/结果、脱敏摘要、状态、耗时、退出码、超时与截断）；唯一 pending approval dialog 只回送事件原始非空 request ID，批准/拒绝单击锁定并等待匹配 `policy_decision`，Escape、断线、关闭与无效 ID 均 fail-closed；RUNNING/WAITING 状态提供一次性 Stop，`Interrupt` 202 后锁到 `INTERRUPTED` turn 边界。新增 reducer/composable/component/conformance 覆盖批准、拒绝、超时、ID 不匹配、断开与普通 tool failure。2026-09-01 实测 Web test 39 passed、lint、type-check、build；任务指定 Python 命令首次受本机代理环境影响返回 HTTP 502，显式 `NO_PROXY/no_proxy=127.0.0.1,localhost` 后 31 passed，仅有 Starlette 第三方弃用警告。未执行真实模型网关、真实浏览器或公网部署；刷新重连/退避、最终视觉和组合入口仍不在本卡。
 
+- T07 — 已交付成功 `COMPLETED_TURN` 后在同一 transport/backend session 的线性 follow-up、刷新时先 GET 查询持久化 transport ID 再以浏览器最后成功 cursor 重订阅，以及仅 GET/SSE 的有限指数退避。事件流断开不改变 Agent、不重放 POST；重复 sequence 幂等忽略，跳号保留 `sequence_gap` 诊断并从旧 cursor 重新订阅；重新 attach 得到 RUNNING 快照时保持 fail-closed，直到消费 canonical turn_end 或 session_end，并提示可以 Stop 或结束 session；404/410 或 `closed` 清除 stale ID、进入失联提示新建，不声称服务器重启后的历史恢复。新增显式 DELETE 结束入口，CloseSession/DELETE 后清理状态并禁止命令；组件卸载只停止 SSE，不发送关闭。2026-09-01 实测 Web test 45 passed、lint、type-check、build；任务指定 Python 命令在默认本机代理环境下 1 个 live HTTP fixture 返回 502，显式 `NO_PROXY/no_proxy=127.0.0.1,localhost` 后 27 passed，仅有 Starlette 第三方弃用警告。未执行真实模型网关、真实浏览器或公网部署；T08 视觉/可访问性与 T09 组合入口仍待后续任务。
 ## Current State
 
 - 2026-08-31 已完成 Bootstrap 及两轮 Change control：`docs/agent-backend-interface.md` 定义 Port 与共享 Backend Service 语义；`docs/agent-transport-interface.md` 是并列 In-process/HTTP binding、HTTP wire/event schema 与共享 adapter 规则的唯一前端接入权威。前端实现 adapter 接入时需要且只需要参考该文档。
 - 既有 Python Agent 后端与 CLI 基线保持不变；HTTP/SSE Agent binding 已可独立运行，`web/` 目前可独立启动未连接占位页。
-- 当前增量已完成 T01/T02/T03/T04/T05/T06；T06 已交付工具生命周期聚合、唯一授权 dialog 与主动中断的 fail-closed Web 旅程，刷新重连旅程、最终视觉和静态组合入口仍属于后续任务。
+- 当前增量已完成 T01/T02/T03/T04/T05/T06/T07；T07 已交付同进程存活 session 的刷新重连、SSE 有界退避、跳号修复和显式生命周期关闭，服务器重启后的历史恢复、最终视觉和静态组合入口仍属于后续任务。
 
 ## Known Issues
 
 - FastAPI + SSE、Vue TypeScript/npm、仅回环部署和金色 Web token 仍是可逆技术选择；用户已明确确认 adapter 所有权和显式 In-process 拆分方向。
 - 南京大学官方规范明确的是标准紫 CMYK 值；架构中的紫色 HEX 是屏幕近似换算，金色 HEX 是产品视觉 token，不声称为校方发布的官方数字色值。
 - `backend.py` 的旧实现名称仅通过懒兼容别名保留；共享实现和执行职责已在 `backend_service.py`，CLI 使用 `transports/in_process.py` 的薄 binding。
-- HTTP binding、T03 Web 工程与 T04 浏览器 wire/session 核已交付；完整 timeline、Vite 开发代理、刷新重连和静态资源组合仍属于后续任务。
+- HTTP binding、T03 Web 工程与 T04 浏览器 wire/session 核已交付；完整 timeline、刷新重连与 T07 生命周期收口已交付，Vite 开发代理和静态资源组合仍属于后续任务。
 - 测试使用 fake backend 与 scripted model；live conformance 仅验证本地 uvicorn/HTTP wiring，未执行真实模型网关、真实浏览器或公网/局域网部署验证。
 - 首版规划不支持服务器重启后的 Web session resume；只支持对仍存活本地进程的刷新重连。
 - T03 的额外 `npm audit --omit=dev` 在当前华为云 npm 镜像上因 audit POST 端点返回 405，未形成依赖审计通过证据；任务要求的 `npm ci`、lint、type-check、test 和 build 均已通过。
-- T04 的 SSE client 暴露显式 start/stop 与 `needsResubscribe` 诊断，但不在本卡自动执行刷新重连退避；该旅程留待 T07。测试使用同一 wire fixture、fake fetch 和 T02 HTTP 契约，未声称真实模型或真实浏览器证据。
+- T07 的刷新重连仅承诺仍存活 Agent HTTP 进程中的 transport session；服务器重启或未知/已关闭 session 会清除标识并要求新建，不能恢复历史 timeline。测试使用 fake fetch、scripted service 和本地 HTTP wiring，未声称真实模型、真实浏览器或公网部署证据。
 
 ## Next Recommended Task
 
-- T07 — 交付 follow-up、刷新重连与健壮事件消费。
+- T08 — 完成极简紫金视觉、响应式与可访问性。

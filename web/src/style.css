@@ -230,6 +230,29 @@ textarea:focus-visible {
   color: #5e5a5f;
 }
 
+.session-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid #ded9d2;
+  border-radius: 1rem;
+  background: #fff;
+}
+
+.session-controls h2 {
+  margin: 0;
+  color: #4d0099;
+  font-size: 1rem;
+}
+
+.session-controls p {
+  margin: 0.35rem 0 0;
+  color: #5e5a5f;
+}
+
 .tool-lifecycles__list {
   display: grid;
   gap: 0.8rem;
@@ -544,6 +567,7 @@ p {
   .connection-card,
   .tool-lifecycles,
   .run-controls,
+  .session-controls,
   .approval-collapsed {
     padding: 1rem;
   }
@@ -560,6 +584,11 @@ p {
   }
 
   .run-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-controls {
     align-items: stretch;
     flex-direction: column;
   }

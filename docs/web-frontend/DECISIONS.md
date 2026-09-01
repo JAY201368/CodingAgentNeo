@@ -75,3 +75,9 @@
 - 选择：`docs/agent-transport-interface.md` 集中定义 In-process 与 HTTP/SSE 的公开 binding、HTTP 命令 JSON、EventEnvelope wire schema、事件目录、错误、安全和生命周期规则；删除重复的 `docs/agent-http-client.md`。Web 前端实现 adapter 接入时需要且只需要参考 transport 规范。
 - 理由与替代：单独的 HTTP client 文档重复端点、SSE、错误和生命周期，却没有独立契约含义，长期会与 transport 规范漂移。README 适合给出启动示例，但不是规范依赖或补充权威来源。
 - 后果：README、实现注释和测试只能链接 transport 规范，不得另行定义协议；Backend Service/adapter 实现者仍可同时读取内部 `agent-backend-interface.md`，普通前端不得把后端 Port 文档当作接入 API。
+
+## 2026-09-01 — T07 只对 GET/SSE 做有限重连
+
+- 选择：浏览器在 SSE 连接失败或流提前结束时最多自动重连 5 次，退避从 250 ms 指数增长并封顶 5 s；跳号则保留最后成功 cursor、立即重新订阅且不把缺口事件写入 timeline。POST 命令不进入重试循环；重新 attach 得到 RUNNING 快照时即使流已打开也暂不允许新任务，直到消费 canonical turn_end 或 session_end，并明确提示可以 Stop 或结束 session。
+- 理由与替代：SSE 是可安全重复的事实读取，有限退避可覆盖短暂本地服务抖动并避免无限请求；命令 POST 连接失败不能证明未被接受，自动重放会产生重复 turn/副作用，因此只允许用户显式决定后重试。跳号必须从旧 cursor 补回而不能跳过缺失事实。
+- 后果：达到上限后浏览器进入失联/禁命令状态但保留不含任务正文的 transport ID/cursor，用户手动重新连接时仍先 GET 查询；未知或已关闭 session 清除标识并提示新建，组件卸载只停止事件消费，不作为 Agent 关闭证据。
