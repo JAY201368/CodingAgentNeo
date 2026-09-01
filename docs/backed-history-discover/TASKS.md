@@ -105,7 +105,7 @@ flowchart TD
 
 ## Stage D: Integrated acceptance
 
-### [ ] T06 — Reconcile contracts and pass the repository quality gate
+### [x] T06 — Reconcile contracts and pass the repository quality gate
 
 **Dependencies:** T04, T05  
 **Scope:** Reconcile implementation indexes, README/configuration guidance, workflow evidence, and aggregate tests with the accepted behavior. Fix only integration defects attributable to T01–T05. Do not implement Web UI, migrations, history mutation, or unrelated cleanup.  
@@ -117,6 +117,8 @@ flowchart TD
 - The milestone report identifies accepted commits, compatibility impact (legacy custom session directories are not migrated), and the intentionally deferred Web UI work.
 
 **Verification:** `python -m pytest`; `python -m pytest tests/acceptance -m acceptance`; `python -m ruff check .`; `python -m ruff format --check .`; `python -m build`; `python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/backed-history-discover`.
+
+**Completed 2026-09-01:** Reconciled the authoritative interface indexes, README/configuration guidance, workflow architecture/evidence, and provider-only adapter boundary tests with the accepted fixed-path history/resume implementation. Main-agent verification in the project `.venv`: full Pytest reported 342 passed; acceptance aggregate reported 56 passed; both emitted only the same third-party Starlette/httpx deprecation warning; Ruff check/format passed; sdist and wheel built successfully; workflow validation and `git diff --check` passed. The milestone preserves the explicit compatibility impact that legacy custom session directories are not migrated and keeps Web UI consumption deferred with no `web/` changes.
 
 ## Recommended order
 

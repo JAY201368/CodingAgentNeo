@@ -1,6 +1,6 @@
 # CodingAgentNeo Agent 适配层接口规范
 
-> 状态：T01 contract versioned；history/provider implementation is deferred to T02–T05
+> 状态：T01–T06 implemented and accepted；Web UI consumption deferred
 > 规范版本：1.1
 > wire protocol：1；history DTO schema：1
 > 日期：2026-09-01
@@ -12,9 +12,10 @@
 **本文是所有 Agent 适配层公开 binding 的唯一权威规范。** README、运行示例、实现注释和测试可以链接本文，但不得另行定义或复制命令、wire、事件、状态、游标、授权、错误、安全或生命周期契约。Web 前端实现适配层接入时需要且只需要参考本文，不需要读取 `agent-backend-interface.md`、Python 源码或其他客户端说明文档；Web 产品布局、视觉和交付范围仍由对应产品架构与任务卡控制。
 
 本文不改变 baseline 完成态；当前仓库已有 baseline 的 per-session In-process 和 live
-HTTP/SSE 行为。本工作流的 T01 只版本化 workspace history provider、历史 DTO、有限 JSON
-读取和 resume request；历史发现与 resume composition 将由后续任务实现。Web 客户端仍只消费
-本文件第 4 节 binding，不直接依赖 Python 端口，也不因本次契约更新而获得新的 Web UI。
+HTTP/SSE 行为。本工作流的 T01 版本化 workspace history provider、历史 DTO、有限 JSON
+读取和 resume request，T02–T05 已完成固定路径、provider composition、In-process binding 和
+HTTP/SSE binding。Web 客户端仍只消费本文件第 4 节 binding，不直接依赖 Python 端口，也不因
+本次契约更新而获得新的 Web UI；Web UI 仍是明确延期的工作。
 
 ## 1. 端口与适配器
 
@@ -53,7 +54,8 @@ Web/other client ── HTTP/SSE Adapter ──┘
 
 当前 baseline 实现已将 `LocalAgentBackend` 的具体执行职责迁入 `AgentBackendService`，并以
 `InProcessAdapter` 提供 per-session 薄 binding。T01 将 workspace-scoped binding 定为同进程正式入口；
-历史 provider/route 实现仍由后续任务完成。为避免破坏 baseline 用户和测试，`LocalAgentBackend`、
+T02–T05 已完成固定目录 provider、历史 DTO/读取、resume composition，以及 In-process 和 HTTP/SSE
+binding。为避免破坏 baseline 用户和测试，`LocalAgentBackend`、
 `build_local_backend` 以及旧的 `build_in_process_adapter` 名称仅保留为有测试、无行为分叉的兼容 facade；
 兼容层不得成为 HTTP Adapter 的依赖。
 
@@ -158,9 +160,7 @@ class InProcessWorkspaceBinding(Protocol):
         self, session_id: str, *, since: int = 0, limit: int = 200
     ) -> SessionEventPage: ...
 
-    def create_session(
-        self, *, resume_session_id: str | None = None
-    ) -> InProcessAdapter: ...
+    def create_session(self, *, resume_session_id: str | None = None) -> InProcessAdapter: ...
 ```
 
 `list_sessions()` 与 `read_session_events()` 在一次调用内完成并返回 page；它们不是长 iterator、
@@ -546,9 +546,9 @@ HTTP 测试可使用 fake backend 证明适配映射；只有对真实 `AgentBac
 
 | 主题 | 实现/契约状态 |
 | --- | --- |
-| In-process Python binding | `src/coding_agent_neo/transports/in_process.py` (`InProcessAdapter`) |
-| Shared backend factory seam | `src/coding_agent_neo/backend_factory.py` (`AgentBackendFactory`) |
+| In-process Python binding | `src/coding_agent_neo/transports/in_process.py` (`InProcessWorkspaceBinding`, `InProcessAdapter`) |
+| Workspace provider and fixed-path composition | `src/coding_agent_neo/assembly.py`, `src/coding_agent_neo/backend_provider.py`, `src/coding_agent_neo/session.py` |
 | HTTP/SSE wire DTO、command decoder、ASGI app、session 生命周期 | `src/coding_agent_neo/transports/http/` |
 | HTTP composition root | `src/coding_agent_neo/http_cli.py` (`coding-agent-neo-http`) |
-| Workspace history provider/DTO、finite history routes and resume request | T01 contract in this document and `agent-backend-interface.md`; implementation is deferred to T02–T05 |
+| Workspace history provider/DTO、finite history routes and resume request | Implemented in `src/coding_agent_neo/backend.py`, `src/coding_agent_neo/backend_provider.py`, and `src/coding_agent_neo/transports/http/`; contract in this document and `agent-backend-interface.md` |
 | 前端接入唯一规范 | 本文第 3 节（In-process）、第 4 节（HTTP/SSE）和第 6 节（共享规则） |

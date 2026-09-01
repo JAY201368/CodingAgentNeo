@@ -7,6 +7,9 @@ api_key_env = "OPENAI_API_KEY"
 workspace = "."
 approval_mode = "ask"
 
+# Session history always lives at <workspace>/.coding-agent-neo/sessions/.
+# The location is fixed; resume accepts only an opaque session ID.
+
 max_steps = 32
 max_tool_calls = 64
 max_wall_seconds = 900

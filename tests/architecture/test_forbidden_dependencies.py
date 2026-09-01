@@ -25,6 +25,22 @@ FORBIDDEN_CLI_NAMES = {
 }
 FRONTEND_MODULES = {"cli", "renderer"}
 STD_STREAMS = {"stdin", "stdout", "stderr"}
+ADAPTER_ROOT = PACKAGE_ROOT / "transports"
+FORBIDDEN_ADAPTER_MODULES = {
+    "coding_agent_neo.assembly",
+    "coding_agent_neo.backend_factory",
+    "coding_agent_neo.backend_provider",
+    "coding_agent_neo.session",
+}
+FORBIDDEN_ADAPTER_NAMES = {
+    "AgentBackendFactory",
+    "FileSessionHistoryRepository",
+    "LocalAgentBackendProvider",
+    "SessionHistoryRepository",
+    "SessionStore",
+    "read_session",
+    "resolve_session_path",
+}
 
 
 def test_tools_do_not_import_or_call_host_side_effect_apis() -> None:
@@ -95,6 +111,34 @@ def _package_imports(tree: ast.AST) -> list[str]:
         ):
             modules.append(node.module or "")
     return modules
+
+
+def test_adapters_use_only_public_ports_not_session_storage_or_assembly() -> None:
+    """Keep history discovery and backend construction behind the provider port."""
+
+    for source_path in sorted(ADAPTER_ROOT.rglob("*.py")):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_modules = {alias.name for alias in node.names}
+                assert not imported_modules & FORBIDDEN_ADAPTER_MODULES, (
+                    f"{source_path.relative_to(PACKAGE_ROOT)} imports a private composition module"
+                )
+                imported_names = {
+                    alias.asname or alias.name.split(".", 1)[0] for alias in node.names
+                }
+                assert not imported_names & FORBIDDEN_ADAPTER_NAMES, (
+                    f"{source_path.relative_to(PACKAGE_ROOT)} imports a private history seam"
+                )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                assert module not in FORBIDDEN_ADAPTER_MODULES, (
+                    f"{source_path.relative_to(PACKAGE_ROOT)} imports {module}"
+                )
+                imported_names = {alias.asname or alias.name for alias in node.names}
+                assert not imported_names & FORBIDDEN_ADAPTER_NAMES, (
+                    f"{source_path.relative_to(PACKAGE_ROOT)} imports a private history seam"
+                )
 
 
 def _uses_standard_streams(tree: ast.AST) -> bool:

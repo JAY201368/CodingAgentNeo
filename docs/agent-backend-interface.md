@@ -6,11 +6,11 @@
 > 适用范围：AgentBackend 应用端口及其规范语义
 > 规范来源：`backend.py`、`models.py`、`agent_loop.py`、`executor.py`、`assembly.py` 与 adapter 契约测试
 
-本文定义 Agent 后端提供给适配层的应用端口，是共享 Backend Service 实现和 In-process、HTTP/SSE 及未来适配器共同遵守的内部权威规范。它不规定任何前端如何直接接入；CLI、Web 或其他前端只应参考自己所使用的适配层接口规范。本文新增的 workspace history provider、DTO 和异常是 T01 先行版本化的契约；后续实现任务必须遵守它们，本文不把尚未实现的能力写成当前产品行为。
+本文定义 Agent 后端提供给适配层的应用端口，是共享 Backend Service 实现和 In-process、HTTP/SSE 及未来适配器共同遵守的内部权威规范。它不规定任何前端如何直接接入；CLI、Web 或其他前端只应参考自己所使用的适配层接口规范。本文新增的 workspace history provider、DTO 和异常由 T01 先行版本化、T02–T05 实现，并已由 T06 完成整合验收；本文不把 Web UI 或其他排除项写成当前产品行为。
 
 文中的“必须”“不得”“应当”是规范性要求；示例只说明结构，不保证 ID、时间戳或具体文案固定。适配层不得通过翻译、缓存或传输机制改变本文的命令、事件、游标、状态、授权和生命周期语义。
 
-baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。后续增量先把其中的共享 Backend Service/Runtime 与端口定义分离，再在该端口之上提供并列的 In-process 和 HTTP/SSE Adapter。两种 adapter 都通过同一个 workspace-scoped `AgentBackendProvider` 取得历史能力和 per-session `AgentBackend`，互不依赖。T01 只冻结契约，不声称 provider、历史读取或 HTTP history route 已经实现。
+baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。后续增量先把其中的共享 Backend Service/Runtime 与端口定义分离，再在该端口之上提供并列的 In-process 和 HTTP/SSE Adapter。两种 adapter 都通过同一个 workspace-scoped `AgentBackendProvider` 取得历史能力和 per-session `AgentBackend`，互不依赖。T01 冻结契约，T02 固定生产存储位置，T03 实现 provider，T04 和 T05 分别完成 In-process 与 HTTP/SSE binding；历史读取均为有限 JSON，Web UI 仍不在本工作流范围内。
 
 > [Agent 适配层接口规范](agent-transport-interface.md) 是前端接入的唯一权威文档。前端只参考其中对应的 In-process 或 HTTP/SSE binding，不需要阅读本文；只有 Backend Service 与 adapter 实现者需要本文定义的内部 Port 语义。
 
@@ -524,12 +524,12 @@ stateDiagram-v2
 | --- | --- |
 | 命令与 `AgentBackend` Port | 当前 `src/coding_agent_neo/backend.py`；T01 后保持在该模块 |
 | 共享 `AgentBackendService`、worker、事件缓冲、授权通道 | `src/coding_agent_neo/backend_service.py` |
-| In-process Python binding | `src/coding_agent_neo/transports/in_process.py` (`InProcessAdapter`) |
+| In-process Python binding | `src/coding_agent_neo/transports/in_process.py` (`InProcessWorkspaceBinding`, `InProcessAdapter`) |
 | 后端组装与 resume | `src/coding_agent_neo/assembly.py`（canonical workspace provider/binding；`build_in_process_adapter` is compatibility facade） |
-| Workspace `AgentBackendProvider`、history DTO/exception contract | T01 versioned in Sections 1.1–1.4; provider implementation is deferred to T02–T05 |
+| Workspace `AgentBackendProvider`、history DTO/exception contract | Port/DTO/error types in `src/coding_agent_neo/backend.py`; fixed-directory implementation in `src/coding_agent_neo/backend_provider.py` (`LocalAgentBackendProvider`) |
 | EventEnvelope、事件名、状态枚举 | `src/coding_agent_neo/models.py` |
 | Store-first、脱敏与安全 JSON | `src/coding_agent_neo/events.py`, `src/coding_agent_neo/session.py` |
 | turn 生命周期和事件 payload | `src/coding_agent_neo/agent_loop.py` |
 | 工具/策略/结果事件 | `src/coding_agent_neo/executor.py` |
 | 当前 In-process 调用者 | `src/coding_agent_neo/cli.py`, `src/coding_agent_neo/renderer.py` |
-| 契约测试 | `tests/unit/test_backend.py`, `tests/unit/test_backend_service.py`, `tests/unit/test_in_process_transport.py`, `tests/transports/test_adapter_conformance.py`, `tests/integration/test_frontend_contract.py` |
+| 契约测试 | `tests/unit/test_backend.py`, `tests/unit/test_backend_service.py`, `tests/unit/test_backend_provider.py`, `tests/unit/test_session_history.py`, `tests/unit/test_in_process_transport.py`, `tests/transports/test_adapter_conformance.py`, `tests/transports/test_http_transport.py`, `tests/integration/test_http_history.py`, `tests/integration/test_frontend_contract.py`, `tests/architecture/test_forbidden_dependencies.py` |

@@ -36,7 +36,7 @@ In one-shot mode, the final assistant text is written to stdout while event/stat
 
 With non-interactive `ask`, bash is immediately denied and stdin is never consumed for approval; choose `--approval-mode auto` or `--yolo` for explicitly unattended bash execution. Never put a key value in source, arguments, tracked configuration, or session files. `--resume <session_id>` continues a linear session without replaying historical tool side effects.
 
-Adapter implementers use the versioned [Agent backend interface specification](docs/agent-backend-interface.md) as the internal command, event, cursor, approval, and lifecycle authority. Frontends use only their corresponding binding in the [Agent adapter interface specification](docs/agent-transport-interface.md). The CLI obtains the explicit `InProcessAdapter` through `build_in_process_adapter`; the shared runtime is `AgentBackendService` from `build_agent_backend`.
+Adapter implementers use the versioned [Agent backend interface specification](docs/agent-backend-interface.md) as the internal command, event, cursor, approval, history, and lifecycle authority. Frontends use only their corresponding binding in the [Agent adapter interface specification](docs/agent-transport-interface.md). Controlled Python callers obtain the canonical workspace binding with `build_in_process_workspace_binding`, list or read bounded history, then call `create_session(resume_session_id=...)`; the CLI compatibility facade `build_in_process_adapter` follows that same provider path. The HTTP composition root uses `build_agent_backend_provider`, and its history reads are finite JSON rather than SSE.
 
 ## Local runtime modes
 

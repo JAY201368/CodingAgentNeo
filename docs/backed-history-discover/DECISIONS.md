@@ -24,7 +24,7 @@ Add only durable, non-obvious decisions with downstream consequences.
 
 - Choice: both adapters receive one workspace-scoped `AgentBackendProvider`; history list/read returns immutable v1 DTO pages with newest-first list ordering, sequence-based event pagination, 4,096-byte first-message projection, and bounded diagnostics. Event history is finite JSON; only live events use iterators/SSE.
 - Rationale and rejected alternative: a provider keeps persistence and resume authorization behind one backend dependency, while explicit bounds and opaque list cursors prevent unbounded responses or path-derived frontend inputs.
-- Consequences: T02–T05 must implement the fixed `workspace/.coding-agent-neo/sessions` location, `session_...` ID validation, `1..100` list and `1..200` event limits, stable history/resume errors, and the HTTP `resume_session_id` request without restoring `session_dir`/`--session-dir`. T01 changes no product implementation or Web fixture.
+- Consequences: T02–T05 were required to implement the fixed `workspace/.coding-agent-neo/sessions` location, `session_...` ID validation, `1..100` list and `1..200` event limits, stable history/resume errors, and the HTTP `resume_session_id` request without restoring `session_dir`/`--session-dir`; those capabilities are now delivered. T01 changed no product implementation or Web fixture.
 
 ## 2026-09-01 — T02 derives persistence and resume targets from resolved workspace
 
@@ -36,7 +36,7 @@ Add only durable, non-obvious decisions with downstream consequences.
 
 - Choice: the public provider port owns immutable bounded DTOs and stable safe errors, while a composition-owned fixed-directory repository parses canonical JSONL and captures short-lived opaque list cursors; event pages lower payload preview bounds when necessary to keep the complete response under 8 MiB.
 - Rationale and rejected alternative: keeping repository access and resume validation inside the provider prevents adapters from opening paths or reconstructing session facts, and projection at the envelope payload preserves canonical IDs and sequence without returning raw JSONL.
-- Consequences: listing isolates malformed candidates as bounded diagnostics, direct reads/resumes revalidate the current fixed file, incomplete tails remain resumable with diagnostics, and T04/T05 must bind their adapters to the provider rather than the repository or backend factory.
+- Consequences: listing isolates malformed candidates as bounded diagnostics, direct reads/resumes revalidate the current fixed file, incomplete tails remain resumable with diagnostics, and T04/T05 bind their adapters to the provider rather than the repository or backend factory.
 
 ## 2026-09-01 — T04 makes the In-process workspace binding provider-backed
 
@@ -49,3 +49,9 @@ Add only durable, non-obvious decisions with downstream consequences.
 - Choice: the HTTP registry receives one `AgentBackendProvider`; it asks that provider to create a new or resumed backend only after enforcing the single-active-session slot, and initializes a resumed transport cursor from provider-owned `resume_last_sequence` metadata.
 - Rationale and rejected alternative: passing a backend factory into the registry or adapting one inside the HTTP app would preserve a second composition path that cannot expose history or resume semantics. The composition root constructs the workspace-scoped provider and passes that single dependency to the HTTP app.
 - Consequences: finite history routes can map typed provider errors without importing `SessionStore`, repositories, paths, or the In-process adapter; HTTP callers must provide the canonical provider contract for both live sessions and history.
+
+## 2026-09-01 — T06 closes the adapter factory seam at the provider boundary
+
+- Choice: the canonical integration path is one workspace-scoped `AgentBackendProvider` for both bounded history and new/resumed backend creation. `backend_factory.py` and the compatibility builders remain only for provider-routed compatibility callers; they are not an HTTP or In-process adapter dependency.
+- Rationale and rejected alternative: retaining the old shared-factory implementation index after T04/T05 would describe a second adapter composition path and contradict the accepted provider contract. Repointing the authoritative indexes keeps implementation, tests, and transport documentation aligned without deleting a tested compatibility facade.
+- Consequences: the fixed `<workspace>/.coding-agent-neo/sessions/` location remains the only production store, legacy custom directories are not migrated, and Web UI consumption remains intentionally deferred outside this workflow. T06 acceptance and commit are owned by the main agent.
