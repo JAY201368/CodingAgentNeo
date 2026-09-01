@@ -33,6 +33,8 @@ export interface SessionState {
   readonly pendingApproval: PendingApproval | null
   readonly commandInFlight: AgentCommandType | null
   readonly commandUncertain: boolean
+  /** Whether the browser still has a usable event stream attachment. */
+  readonly streamAvailable: boolean
   readonly lastEvent: AgentEventEnvelope | null
   /** Bounded facts retained for later projections; this is not a rendered timeline. */
   readonly events: readonly AgentEventEnvelope[]
@@ -84,6 +86,7 @@ export function createInitialSessionState(
     pendingApproval: null,
     commandInFlight: null,
     commandUncertain: false,
+    streamAvailable: false,
     lastEvent: null,
     events: [],
     latestAssistantText: '',
@@ -184,7 +187,13 @@ function applyKnownEvent(
     case 'approval_request': {
       const pending = approvalFromEvent(event)
       if (pending === null) {
-        return addDiagnostic(state, {
+        // A malformed approval request is still evidence that a turn may be
+        // waiting on a tool. Keep input closed and expose Stop, but never
+        // create a pending approval or infer an ID from payload text.
+        const invalidState = state.pendingApproval === null && !isTerminalState(state.status)
+          ? { ...state, status: 'RUNNING' as const, turnActive: true }
+          : state
+        return addDiagnostic(invalidState, {
           code: 'invalid_field',
           message: 'approval request correlation is invalid; approval remains closed',
           sequence: event.sequence,
@@ -195,7 +204,17 @@ function applyKnownEvent(
     case 'policy_decision':
       if (state.pendingApproval !== null) {
         if (event.correlationId === state.pendingApproval.correlationId) {
-          return { ...state, pendingApproval: null, status: 'RUNNING' }
+          return {
+            ...state,
+            pendingApproval: null,
+            // A matching policy fact is the acknowledgement boundary for an
+            // accepted approval response.  Interrupt remains locked until its
+            // own turn_end boundary.
+            commandInFlight: state.commandInFlight === 'ApprovalResponse'
+              ? null
+              : state.commandInFlight,
+            status: 'RUNNING',
+          }
         }
         return addDiagnostic(state, {
           code: 'invalid_field',
@@ -225,11 +244,22 @@ function applyKnownEvent(
         status: nextStatus,
         turnActive: false,
         pendingApproval: null,
+        commandInFlight: null,
+        commandUncertain: false,
         finalAssistantText: finalText,
       }
     }
     case 'agent_end':
-      return eventState === null ? state : { ...state, status: eventState, turnActive: false }
+      return eventState === null
+        ? state
+        : {
+            ...state,
+            status: eventState,
+            turnActive: false,
+            pendingApproval: null,
+            commandInFlight: null,
+            commandUncertain: false,
+          }
     case 'session_end':
       return {
         ...state,
@@ -239,6 +269,9 @@ function applyKnownEvent(
           : state.status,
         turnActive: false,
         pendingApproval: null,
+        commandInFlight: null,
+        commandUncertain: false,
+        streamAvailable: false,
       }
     case 'error':
       // An error event is a process fact, not the turn boundary.  The status
@@ -289,6 +322,7 @@ function reduceEvent(state: SessionState, input: unknown): SessionState {
   const consumed = withEvent(state, event)
   const diagnosed = {
     ...consumed,
+    streamAvailable: true,
     diagnostics: diagnosticsWith(consumed.diagnostics, parsed.diagnostics),
   }
   return applyKnownEvent(diagnosed, event)
@@ -303,6 +337,7 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
         lastError: null,
         commandInFlight: null,
         commandUncertain: false,
+        streamAvailable: false,
       }
     case 'CONNECTED':
       return {
@@ -315,6 +350,7 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
         pendingApproval: null,
         commandInFlight: null,
         commandUncertain: false,
+        streamAvailable: true,
         lastError: null,
       }
     case 'EVENT':
@@ -326,11 +362,16 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
           ? 'error'
           : 'connected',
         lastError: action.message,
+        streamAvailable: false,
       }
     case 'STREAM_CLOSED':
       return state.connection === 'closed'
         ? state
-        : { ...state, connection: state.transportSessionId === null ? 'error' : 'connected' }
+        : {
+            ...state,
+            connection: state.transportSessionId === null ? 'error' : 'connected',
+            streamAvailable: false,
+          }
     case 'COMMAND_STARTED':
       return {
         ...state,
@@ -343,9 +384,16 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
     case 'COMMAND_ACCEPTED':
       return {
         ...state,
-        commandInFlight: null,
+        // A 202 only acknowledges receipt.  Approval remains locked until a
+        // matching policy_decision, and Stop remains locked until turn_end.
+        commandInFlight: (
+          (action.commandType === 'ApprovalResponse' && state.pendingApproval !== null) ||
+          (action.commandType === 'Interrupt' && state.turnActive)
+        ) ? action.commandType : null,
         commandUncertain: false,
-        ...(action.commandType === 'CloseSession' ? { connection: 'closed' as const } : {}),
+        ...(action.commandType === 'CloseSession'
+          ? { connection: 'closed' as const, streamAvailable: false }
+          : {}),
       }
     case 'COMMAND_FAILED':
       return {
@@ -367,6 +415,7 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
         connection: 'closed',
         commandInFlight: null,
         commandUncertain: false,
+        streamAvailable: false,
         turnActive: false,
         pendingApproval: null,
       }
@@ -406,13 +455,22 @@ export function commandGateFor(state: SessionState): CommandGate {
     }
   }
   if (state.status === 'WAITING_FOR_APPROVAL') {
+    const approvalResponsePending = state.commandInFlight === 'ApprovalResponse'
     return {
       kind: 'waiting_for_approval',
       canSubmitTask: false,
-      canRespondToApproval: state.pendingApproval !== null && state.commandInFlight === null,
+      canRespondToApproval: state.pendingApproval !== null &&
+        !approvalResponsePending &&
+        state.streamAvailable,
       canInterrupt: state.turnActive && state.commandInFlight === null,
       canClose: true,
-      reason: state.commandInFlight === null ? '等待唯一授权响应' : '授权命令仍在提交',
+      reason: approvalResponsePending
+        ? '授权已提交，等待策略事件确认'
+        : state.pendingApproval === null
+          ? '授权请求无效，未发送授权；可使用 Stop 中断'
+          : !state.streamAvailable
+            ? '事件流已断开，授权保持关闭；可使用 Stop 中断'
+            : '等待唯一授权响应',
     }
   }
   if (state.turnActive) {

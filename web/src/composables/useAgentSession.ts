@@ -319,7 +319,6 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
     approved: boolean,
     signal?: AbortSignal,
   ): Promise<void> {
-    ensureCan('canRespondToApproval')
     if (
       typeof requestId !== 'string' ||
       requestId.trim().length === 0 ||
@@ -330,6 +329,7 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
     if (typeof approved !== 'boolean') {
       throw new SessionCommandError('授权决定无效')
     }
+    ensureCan('canRespondToApproval')
     await send({ type: 'ApprovalResponse', request_id: requestId, approved }, signal)
   }
 

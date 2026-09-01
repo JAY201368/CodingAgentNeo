@@ -55,3 +55,5 @@ export type {
 } from './protocol'
 export { projectTimeline } from './timeline'
 export type { TimelineItem, TimelineItemKind } from './timeline'
+export { projectToolLifecycles, projectTools } from './tools'
+export type { ToolLifecycle, ToolLifecycleItem, ToolResultStatus } from './tools'

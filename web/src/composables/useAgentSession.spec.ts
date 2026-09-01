@@ -145,4 +145,91 @@ describe('useAgentSession', () => {
     ])
     expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
+
+  it('locks approval after 202 and only releases it on the matching policy event', async () => {
+    const bodies: string[] = []
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/sessions') && init?.method === 'POST') {
+        return response({ transport_session_id: 'transport_fixture_1', state: 'RUNNING', cursor: 0 }, 201)
+      }
+      if (init?.body !== undefined) {
+        bodies.push(String(init.body))
+      }
+      return response({ accepted: true }, 202)
+    })
+    const session = useAgentSession({
+      client: new AgentHttpClient({ fetchImpl }),
+      storage: null,
+      autoStartEvents: false,
+    })
+    await session.connect()
+    session.dispatch({
+      type: 'EVENT',
+      event: {
+        ...fixture.events[0],
+        sequence: 1,
+        type: 'approval_request',
+        correlation_id: 'correlation_fixture_1',
+        payload: {
+          request_id: 'correlation_fixture_1',
+          tool_name: 'read_file',
+          arguments_summary: 'safe summary',
+        },
+      },
+    })
+
+    await session.respondToApproval('correlation_fixture_1', true)
+    expect(session.state.value.pendingApproval?.requestId).toBe('correlation_fixture_1')
+    expect(session.state.value.commandInFlight).toBe('ApprovalResponse')
+    await expect(session.respondToApproval('correlation_fixture_1', false))
+      .rejects.toThrow('授权已提交')
+    expect(bodies).toEqual([
+      '{"type":"ApprovalResponse","request_id":"correlation_fixture_1","approved":true}',
+    ])
+
+    session.dispatch({
+      type: 'EVENT',
+      event: {
+        ...fixture.events[1],
+        sequence: 2,
+        type: 'policy_decision',
+        correlation_id: 'correlation_fixture_1',
+        payload: { decision: 'allow' },
+      },
+    })
+    expect(session.state.value.pendingApproval).toBeNull()
+    expect(session.state.value.commandInFlight).toBeNull()
+  })
+
+  it('does not send approval for an invalid ID and keeps Stop available after stream loss', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/sessions') && init?.method === 'POST') {
+        return response({ transport_session_id: 'transport_fixture_1', state: 'RUNNING', cursor: 0 }, 201)
+      }
+      return response({ accepted: true }, 202)
+    })
+    const session = useAgentSession({
+      client: new AgentHttpClient({ fetchImpl }),
+      storage: null,
+      autoStartEvents: false,
+    })
+    await session.connect()
+    session.dispatch({
+      type: 'EVENT',
+      event: {
+        ...fixture.events[0],
+        sequence: 1,
+        type: 'approval_request',
+        correlation_id: 'correlation_fixture_1',
+        payload: { request_id: 'correlation_fixture_1' },
+      },
+    })
+    await expect(session.respondToApproval('not-the-pending-id', true))
+      .rejects.toThrow('授权请求 ID 无效')
+    session.dispatch({ type: 'STREAM_ERROR', message: 'disconnected' })
+    await expect(session.respondToApproval('correlation_fixture_1', true))
+      .rejects.toThrow('事件流已断开')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(session.gate.value.canInterrupt).toBe(true)
+  })
 })

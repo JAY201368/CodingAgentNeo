@@ -173,4 +173,172 @@ describe('App', () => {
     expect(wrapper.text()).toContain('重新连接')
     wrapper.unmount()
   })
+
+  it('renders one aggregated tool card and sends one approval response', async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const queuedFrames: string[] = []
+    const commandCalls: string[] = []
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller
+        for (const frame of queuedFrames.splice(0)) {
+          controller.enqueue(encoder.encode(frame))
+        }
+      },
+      cancel() {
+        streamController = null
+      },
+    })
+    const push = (items: readonly Record<string, unknown>[]): void => {
+      const frames = items
+        .map((item) => `id: ${String(item.sequence)}\nevent: agent-event\ndata: ${JSON.stringify(item)}\n\n`)
+        .join('')
+      if (streamController === null) {
+        queuedFrames.push(frames)
+      } else {
+        streamController.enqueue(encoder.encode(frames))
+      }
+    }
+    const client = new AgentHttpClient({
+      fetchImpl: vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        if (path.endsWith('/sessions') && init?.method === 'POST') {
+          return new Response(JSON.stringify({
+            transport_session_id: 'transport_app_approval',
+            state: 'RUNNING',
+            cursor: 0,
+          }), { status: 201 })
+        }
+        if (path.includes('/events?')) {
+          return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+        }
+        if (path.endsWith('/commands')) {
+          commandCalls.push(String(init?.body))
+          return new Response(JSON.stringify({ accepted: true }), { status: 202 })
+        }
+        return new Response(null, { status: 204 })
+      }),
+    })
+    const wrapper = mount(App, { props: { client, storage: null } })
+    await nextTask()
+    await flushPromises()
+    await wrapper.get('textarea').setValue('confirm')
+    await wrapper.get('form').trigger('submit')
+    push([
+      event(1, 'user_message', { text: 'confirm' }),
+      event(2, 'tool_call', { tool_name: 'read_file', arguments: { secret: 'not rendered' } }),
+      {
+        ...event(3, 'approval_request', {
+          request_id: 'correlation_app_approval',
+          tool_name: 'read_file',
+          arguments_summary: 'safe redacted summary',
+          timeout_seconds: 10,
+        }),
+        correlation_id: 'correlation_app_approval',
+      },
+    ].map((item, index) => ({
+      ...item,
+      correlation_id: index === 0 ? null : 'correlation_app_approval',
+    })))
+    await flushPromises()
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('safe redacted summary')
+    expect(wrapper.text()).not.toContain('not rendered')
+    await wrapper.get('[role="dialog"] .primary-action').trigger('click')
+    await flushPromises()
+    await wrapper.get('[role="dialog"] .primary-action').trigger('click')
+    expect(commandCalls).toEqual([
+      '{"type":"SubmitTask","text":"confirm"}',
+      '{"type":"ApprovalResponse","request_id":"correlation_app_approval","approved":true}',
+    ])
+
+    push([
+      {
+        ...event(4, 'policy_decision', { decision: 'allow' }),
+        correlation_id: 'correlation_app_approval',
+      },
+      {
+        ...event(5, 'tool_result', {
+          result: {
+            status: 'success',
+            text: 'safe result',
+            duration_seconds: 0.25,
+            exit_code: 0,
+          },
+        }),
+        correlation_id: 'correlation_app_approval',
+      },
+    ])
+    await flushPromises()
+    expect(wrapper.findAll('.tool-card')).toHaveLength(1)
+    expect(wrapper.text()).toContain('成功（success）')
+    expect(wrapper.text()).toContain('0.250 秒')
+    expect(wrapper.text()).toContain('退出码')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sends Stop once and locks the composer after INTERRUPTED', async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const commandCalls: string[] = []
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller
+      },
+      cancel() {
+        streamController = null
+      },
+    })
+    const push = (item: Record<string, unknown>): void => {
+      streamController?.enqueue(encoder.encode(
+        `id: ${String(item.sequence)}\nevent: agent-event\ndata: ${JSON.stringify(item)}\n\n`,
+      ))
+    }
+    const client = new AgentHttpClient({
+      fetchImpl: vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        if (path.endsWith('/sessions') && init?.method === 'POST') {
+          return new Response(JSON.stringify({
+            transport_session_id: 'transport_app_interrupt',
+            state: 'RUNNING',
+            cursor: 0,
+          }), { status: 201 })
+        }
+        if (path.includes('/events?')) {
+          return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+        }
+        if (path.endsWith('/commands')) {
+          commandCalls.push(String(init?.body))
+          return new Response(JSON.stringify({ accepted: true }), { status: 202 })
+        }
+        return new Response(null, { status: 204 })
+      }),
+    })
+    const wrapper = mount(App, { props: { client, storage: null } })
+    await nextTask()
+    await flushPromises()
+    await wrapper.get('textarea').setValue('interrupt me')
+    await wrapper.get('form').trigger('submit')
+    push(event(1, 'user_message', { text: 'interrupt me' }))
+    await flushPromises()
+
+    const stop = wrapper.get('.stop-action')
+    await stop.trigger('click')
+    await flushPromises()
+    await stop.trigger('click')
+    expect(commandCalls).toEqual([
+      '{"type":"SubmitTask","text":"interrupt me"}',
+      '{"type":"Interrupt","reason":"user_cancelled"}',
+    ])
+    expect((stop.element as HTMLButtonElement).disabled).toBe(true)
+
+    push(event(2, 'turn_end', { state: 'INTERRUPTED', reason: 'user_cancelled', assistant_text: '' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('已中断')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(true)
+    wrapper.unmount()
+  })
 })

@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：T01～T05 已验收；T06～T10 待串行实施
+> 状态：T01～T06 已验收；T07～T10 待串行实施
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -125,7 +125,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** 已将 T04 session 核接入 Vue，交付自动创建 transport session、非空任务 composer、重复提交锁、按 sequence 的用户/assistant/运行/错误/结束时间线、`turn_end.assistant_text` 优先的最终回复以及 COMPLETED_TURN follow-up/终止态 gate。长文本以纯文本有界展示并可展开，未知/缺失/截断 payload 降级，普通 tool failure 不改写 session FAILED；稳定 400/409/410 code 均映射为安全提示，POST 不重放。主 Agent 复核：Web 24 passed、lint/type-check/build、transport + frontend contract 19 passed及静态安全/diff 扫描均通过；Python 集成需显式 `NO_PROXY/no_proxy=127.0.0.1,localhost` 避开本机代理，仅有 Starlette 弃用警告。scripted fake 经真实 Backend Service + HTTP adapter 验证无授权 turn 到 `turn_end`；未执行真实模型、真实浏览器或公网部署，approval、精细工具卡和刷新重连留待后续卡。
 
-### [ ] T06 — 交付工具生命周期、授权与主动中断
+### [x] T06 — 交付工具生命周期、授权与主动中断
 
 **依赖:** T05
 **范围:** 实现 tool/correlation 生命周期卡片、唯一 pending approval dialog、批准/拒绝、Stop 和相关焦点/状态反馈。排除自动/批量授权、命令编辑和运行中 steering。
@@ -139,6 +139,8 @@ flowchart TD
 - 组件及 adapter conformance 覆盖批准、拒绝、超时、ID 不匹配、断开和普通 tool failure。
 
 **验证:** `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; `.venv/bin/python -m pytest tests/transports tests/unit/test_backend.py tests/integration/test_frontend_contract.py`。
+
+**完成摘要（2026-09-01）:** 已交付按 canonical correlation ID 聚合的工具生命周期卡片、唯一 pending approval dialog、批准/拒绝单次锁和 RUNNING/WAITING Stop；只展示后端脱敏摘要与状态/耗时/退出码/超时/截断事实，不执行 tool/arguments。ApprovalResponse 202 后保持锁定直至匹配 `policy_decision`，Interrupt 202 后锁到结束边界；Escape、断线、unmount、空或不匹配 ID 均不产生批准，无效授权保留 Stop，普通 tool failure 不改写 session FAILED。主 Agent 复核：Web 39 passed、lint/type-check/build、Python adapter/backend/frontend 31 passed、静态安全与 diff check 均通过；Python 回环集成显式设置 `NO_PROXY/no_proxy=127.0.0.1,localhost`，仅有 Starlette 弃用警告。未执行真实模型、真实浏览器或公网部署，刷新重连与最终可访问性打磨留待 T07/T08。
 
 ### [ ] T07 — 交付 follow-up、刷新重连与健壮事件消费
 

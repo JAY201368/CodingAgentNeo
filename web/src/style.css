@@ -87,7 +87,10 @@ textarea:focus-visible {
 .composer,
 .timeline,
 .final-reply,
-.connection-card {
+.connection-card,
+.tool-lifecycles,
+.run-controls,
+.approval-collapsed {
   margin-top: 1.25rem;
   padding: 1.25rem;
   border: 1px solid #ded9d2;
@@ -151,7 +154,9 @@ textarea:focus-visible {
 
 .primary-action,
 .secondary-action,
-.bounded-text__toggle {
+.bounded-text__toggle,
+.stop-action,
+.approval-dialog__close {
   border: 0;
   border-radius: 0.55rem;
   cursor: pointer;
@@ -174,8 +179,20 @@ textarea:focus-visible {
   color: #4d0099;
 }
 
+.stop-action {
+  padding: 0.65rem 1rem;
+  background: #8b1e1e;
+  color: #fff;
+}
+
+.stop-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .primary-action:disabled,
-.secondary-action:disabled {
+.secondary-action:disabled,
+.approval-dialog__close:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -190,6 +207,170 @@ textarea:focus-visible {
 }
 
 .connection-card p {
+  color: #5e5a5f;
+}
+
+.run-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-color: #dfabab;
+  background: #fff8f8;
+}
+
+.run-controls h2 {
+  margin: 0;
+  color: #8b1e1e;
+  font-size: 1rem;
+}
+
+.run-controls p {
+  margin: 0.35rem 0 0;
+  color: #5e5a5f;
+}
+
+.tool-lifecycles__list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.tool-card {
+  padding: 1rem;
+  border: 1px solid #ded9d2;
+  border-radius: 0.75rem;
+  background: #faf9f7;
+}
+
+.tool-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tool-card__eyebrow {
+  margin: 0;
+  color: #6f6a70;
+  font-size: 0.75rem;
+}
+
+.tool-card__title {
+  margin: 0.2rem 0 0;
+  color: #4d0099;
+  font-size: 1rem;
+}
+
+.tool-card__status {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  background: #eee6f7;
+  color: #4d0099;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.tool-card__facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 1rem 0 0;
+}
+
+.tool-card__facts div {
+  min-width: 0;
+}
+
+.tool-card__facts dt {
+  color: #6f6a70;
+  font-size: 0.75rem;
+}
+
+.tool-card__facts dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+.tool-card__section {
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid #e5e0da;
+}
+
+.tool-card__section h4 {
+  margin: 0 0 0.35rem;
+  color: #4d0099;
+  font-size: 0.85rem;
+}
+
+.tool-card__fact,
+.tool-card__note {
+  margin: 0.8rem 0 0;
+  color: #5e5a5f;
+  font-size: 0.85rem;
+}
+
+.tool-card__note {
+  color: #6b4f00;
+}
+
+.approval-backdrop {
+  position: relative;
+  z-index: 1;
+  margin-top: 1.25rem;
+}
+
+.approval-dialog {
+  padding: 1.25rem;
+  border: 2px solid #c7a34b;
+  border-radius: 1rem;
+  background: #fffdf8;
+  box-shadow: 0 0.8rem 2rem rgb(36 33 36 / 9%);
+}
+
+.approval-dialog > p {
+  margin: 0.7rem 0;
+}
+
+.approval-dialog__meta,
+.approval-dialog__status {
+  color: #5e5a5f;
+  font-size: 0.85rem;
+}
+
+.approval-dialog__warning {
+  color: #8b1e1e;
+  font-weight: 700;
+}
+
+.approval-dialog__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.approval-dialog__deny {
+  border: 1px solid #4d0099;
+}
+
+.approval-dialog__close {
+  padding: 0.45rem 0.65rem;
+  color: #5e5a5f;
+  background: transparent;
+  text-decoration: underline;
+}
+
+.approval-collapsed {
+  border-color: #c7a34b;
+  background: #fffdf8;
+}
+
+.approval-collapsed p {
+  margin: 0 0 0.7rem;
   color: #5e5a5f;
 }
 
@@ -360,7 +541,10 @@ p {
   .composer,
   .timeline,
   .final-reply,
-  .connection-card {
+  .connection-card,
+  .tool-lifecycles,
+  .run-controls,
+  .approval-collapsed {
     padding: 1rem;
   }
 
@@ -370,8 +554,18 @@ p {
   }
 
   .primary-action,
-  .secondary-action {
+  .secondary-action,
+  .stop-action {
     width: 100%;
+  }
+
+  .run-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tool-card__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .placeholder-shell {

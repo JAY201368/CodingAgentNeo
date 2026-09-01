@@ -8,9 +8,12 @@ import {
 } from './api/client'
 import { useAgentSession, SessionCommandError } from './composables/useAgentSession'
 import BoundedText from './components/BoundedText.vue'
+import ApprovalDialog from './components/ApprovalDialog.vue'
 import TaskComposer from './components/TaskComposer.vue'
 import Timeline from './components/Timeline.vue'
+import ToolCard from './components/ToolCard.vue'
 import { projectTimeline } from './domain/timeline'
+import { projectToolLifecycles } from './domain/tools'
 
 const props = withDefaults(defineProps<{
   readonly client?: import('./api/client').AgentHttpClient
@@ -32,6 +35,8 @@ const connecting = ref(false)
 let connectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 
 const timelineItems = computed(() => projectTimeline(session.state.value.events))
+const toolLifecycles = computed(() => projectToolLifecycles(session.state.value.events))
+const pendingApproval = computed(() => session.state.value.pendingApproval)
 const isConnected = computed(() =>
   session.state.value.connection === 'connected' && session.transportSessionId.value !== null,
 )
@@ -74,7 +79,7 @@ const composerReason = computed(() => {
     return '上一轮已完成，可以继续输入 follow-up。'
   }
   if (gate.kind === 'waiting_for_approval') {
-    return 'Agent 正在等待授权；本页面暂不提供授权操作。'
+    return gate.reason
   }
   if (gate.kind === 'terminal') {
     return `Session ${statusLabel.value}，不能继续提交任务。`
@@ -89,6 +94,13 @@ const composerReason = computed(() => {
 })
 const hasDiagnostics = computed(() => session.state.value.diagnostics.length > 0)
 const displayError = computed(() => actionError.value ?? session.state.value.lastError)
+const approvalSubmitting = computed(() => session.state.value.commandInFlight === 'ApprovalResponse')
+const interruptSubmitting = computed(() => session.state.value.commandInFlight === 'Interrupt')
+const showStop = computed(() =>
+  isConnected.value &&
+  session.state.value.turnActive &&
+  (session.state.value.status === 'RUNNING' || session.state.value.status === 'WAITING_FOR_APPROVAL'),
+)
 
 function safeErrorMessage(error: unknown): string {
   if (error instanceof AgentApiError) {
@@ -171,6 +183,30 @@ async function submitTask(text: string): Promise<void> {
       actionError.value = `${safeErrorMessage(error)} 命令结果未知，页面不会自动重试。`
     } else {
       composer.value?.unlock()
+    }
+  }
+}
+
+async function respondToApproval(requestId: string, approved: boolean): Promise<void> {
+  actionError.value = null
+  try {
+    await session.respondToApproval(requestId, approved)
+  } catch (error) {
+    handleFailure(error)
+    if (session.state.value.commandUncertain) {
+      actionError.value = `${safeErrorMessage(error)} 授权结果未知，页面不会自动重试。`
+    }
+  }
+}
+
+async function stopTurn(): Promise<void> {
+  actionError.value = null
+  try {
+    await session.interrupt()
+  } catch (error) {
+    handleFailure(error)
+    if (session.state.value.commandUncertain) {
+      actionError.value = `${safeErrorMessage(error)} 中断结果未知，页面不会自动重试。`
     }
   }
 }
@@ -267,6 +303,57 @@ onBeforeUnmount(() => {
         :status-reason="composerReason"
         @submit="submitTask"
       />
+
+      <section
+        v-if="showStop"
+        class="run-controls"
+        aria-labelledby="run-controls-title"
+      >
+        <div>
+          <h2 id="run-controls-title">
+            当前 turn
+          </h2>
+          <p>
+            {{ interruptSubmitting ? '中断请求已发送，等待 INTERRUPTED 结束事件。' : '任务正在运行；可主动停止。' }}
+          </p>
+        </div>
+        <button
+          class="stop-action"
+          type="button"
+          :disabled="!session.gate.value.canInterrupt || interruptSubmitting"
+          @click="stopTurn"
+        >
+          {{ interruptSubmitting ? '正在停止…' : '停止（Stop）' }}
+        </button>
+      </section>
+
+      <ApprovalDialog
+        :approval="pendingApproval"
+        :disabled="!session.gate.value.canRespondToApproval"
+        :submitting="approvalSubmitting"
+        :stream-available="session.state.value.streamAvailable"
+        @decide="respondToApproval"
+      />
+
+      <section
+        v-if="toolLifecycles.length > 0"
+        class="tool-lifecycles"
+        aria-labelledby="tool-lifecycles-title"
+      >
+        <div class="section-heading">
+          <h2 id="tool-lifecycles-title">
+            工具执行
+          </h2>
+          <span class="section-heading__hint">按 correlation ID 聚合</span>
+        </div>
+        <div class="tool-lifecycles__list">
+          <ToolCard
+            v-for="item in toolLifecycles"
+            :key="item.correlationId"
+            :item="item"
+          />
+        </div>
+      </section>
 
       <section
         v-if="finalReply"

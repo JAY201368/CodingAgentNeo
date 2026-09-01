@@ -69,6 +69,11 @@ function toolResultText(event: AgentEventEnvelope): string {
   return text === null ? `工具结果：${status}` : `工具结果：${status} · ${text}`
 }
 
+function approvalCorrelationValid(event: AgentEventEnvelope): boolean {
+  const requestId = payloadString(event.payload, 'request_id')
+  return requestId !== null && event.correlationId !== null && requestId === event.correlationId
+}
+
 function itemFor(event: AgentEventEnvelope): TimelineItem {
   const truncated = isTruncatedPayload(event.payload)
   const preview = truncatedText(event)
@@ -120,8 +125,14 @@ function itemFor(event: AgentEventEnvelope): TimelineItem {
       text = preview ?? `工具：${toolName(event)}`
       break
     case 'approval_request':
-      title = '等待授权'
-      text = preview ?? `工具：${toolName(event)}（本页面暂不提供授权操作）`
+      if (!approvalCorrelationValid(event)) {
+        kind = 'error'
+        title = '无效授权请求'
+        text = '授权请求与事件关联 ID 不匹配，未发送批准或拒绝；可使用 Stop 中断。'
+      } else {
+        title = '等待授权'
+        text = preview ?? `工具：${toolName(event)}（等待唯一授权响应）`
+      }
       break
     case 'policy_decision':
       title = '策略决定'

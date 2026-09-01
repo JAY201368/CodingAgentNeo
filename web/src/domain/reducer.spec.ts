@@ -161,4 +161,180 @@ describe('defensive event parser and reducer', () => {
       expect.objectContaining({ code: 'invalid_field' }),
     ]))
   })
+
+  it('keeps an accepted approval locked until the matching policy fact arrives', () => {
+    let state = createInitialSessionState()
+    state = reduceSession(state, {
+      type: 'CONNECTED',
+      transportSessionId: 'transport_fixture_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    state = reduceSession(state, { type: 'EVENT', event: {
+      ...fixture.events[0],
+      sequence: 1,
+      type: 'approval_request',
+      correlation_id: 'correlation_fixture_1',
+      payload: {
+        request_id: 'correlation_fixture_1',
+        tool_name: 'read_file',
+        arguments_summary: 'safe summary',
+      },
+    } })
+    state = reduceSession(state, { type: 'COMMAND_STARTED', commandType: 'ApprovalResponse' })
+    state = reduceSession(state, { type: 'COMMAND_ACCEPTED', commandType: 'ApprovalResponse' })
+
+    expect(state.pendingApproval?.requestId).toBe('correlation_fixture_1')
+    expect(state.commandInFlight).toBe('ApprovalResponse')
+    expect(commandGateFor(state).canRespondToApproval).toBe(false)
+
+    const duplicatePolicy = reduceSession(state, { type: 'EVENT', event: {
+      ...fixture.events[1],
+      sequence: 2,
+      type: 'policy_decision',
+      correlation_id: 'other-correlation',
+      payload: { decision: 'allow' },
+    } })
+    expect(duplicatePolicy.pendingApproval?.requestId).toBe('correlation_fixture_1')
+    expect(duplicatePolicy.commandInFlight).toBe('ApprovalResponse')
+
+    state = reduceSession(state, { type: 'EVENT', event: {
+      ...fixture.events[2],
+      sequence: 2,
+      type: 'policy_decision',
+      correlation_id: 'correlation_fixture_1',
+      payload: { decision: 'allow' },
+    } })
+    expect(state.pendingApproval).toBeNull()
+    expect(state.commandInFlight).toBeNull()
+    expect(commandGateFor(state).kind).toBe('turn_running')
+  })
+
+  it('keeps Stop locked after 202 until an INTERRUPTED turn boundary', () => {
+    let state = createInitialSessionState()
+    state = reduceSession(state, {
+      type: 'CONNECTED',
+      transportSessionId: 'transport_fixture_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    state = reduceSession(state, { type: 'EVENT', event: {
+      ...fixture.events[0],
+      sequence: 1,
+      type: 'user_message',
+      payload: { text: 'inspect' },
+    } })
+    state = reduceSession(state, { type: 'COMMAND_STARTED', commandType: 'Interrupt' })
+    state = reduceSession(state, { type: 'COMMAND_ACCEPTED', commandType: 'Interrupt' })
+    expect(state.commandInFlight).toBe('Interrupt')
+    expect(commandGateFor(state).canInterrupt).toBe(false)
+
+    state = reduceSession(state, { type: 'EVENT', event: {
+      ...fixture.events[1],
+      sequence: 2,
+      type: 'turn_end',
+      payload: { state: 'INTERRUPTED', reason: 'user_cancelled', assistant_text: '' },
+    } })
+    expect(state.status).toBe('INTERRUPTED')
+    expect(state.turnActive).toBe(false)
+    expect(state.commandInFlight).toBeNull()
+    expect(commandGateFor(state).kind).toBe('terminal')
+  })
+
+  it('blocks approval after a stream error without treating the error as approval', () => {
+    let state = createInitialSessionState()
+    state = reduceSession(state, {
+      type: 'CONNECTED',
+      transportSessionId: 'transport_fixture_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    state = reduceSession(state, { type: 'EVENT', event: {
+      ...fixture.events[0],
+      sequence: 1,
+      type: 'approval_request',
+      correlation_id: 'correlation_fixture_1',
+      payload: { request_id: 'correlation_fixture_1' },
+    } })
+    state = reduceSession(state, { type: 'STREAM_ERROR', message: 'disconnected' })
+    expect(state.pendingApproval?.requestId).toBe('correlation_fixture_1')
+    expect(state.streamAvailable).toBe(false)
+    expect(commandGateFor(state).canRespondToApproval).toBe(false)
+    expect(commandGateFor(state).canInterrupt).toBe(true)
+  })
+
+  it('keeps an invalid approval request fail-closed while exposing Stop', () => {
+    let state = reduceSession(createInitialSessionState(), {
+      type: 'CONNECTED',
+      transportSessionId: 'transport_fixture_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    state = reduceSession(state, { type: 'EVENT', event: {
+      ...fixture.events[0],
+      sequence: 1,
+      type: 'approval_request',
+      correlation_id: 'correlation_fixture_1',
+      payload: { request_id: 'different' },
+    } })
+    expect(state.pendingApproval).toBeNull()
+    expect(state.turnActive).toBe(true)
+    expect(commandGateFor(state).canRespondToApproval).toBe(false)
+    expect(commandGateFor(state).canInterrupt).toBe(true)
+  })
+
+  it('handles timeout and ordinary tool failure as tool facts, not session failure', () => {
+    let state = createInitialSessionState()
+    state = reduceSession(state, {
+      type: 'CONNECTED',
+      transportSessionId: 'transport_fixture_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    const events = [
+      {
+        ...fixture.events[0],
+        sequence: 1,
+        type: 'tool_call',
+        correlation_id: 'correlation_fixture_1',
+        payload: { tool_name: 'bash' },
+      },
+      {
+        ...fixture.events[1],
+        sequence: 2,
+        type: 'approval_request',
+        correlation_id: 'correlation_fixture_1',
+        payload: { request_id: 'correlation_fixture_1', tool_name: 'bash' },
+      },
+      {
+        ...fixture.events[2],
+        sequence: 3,
+        type: 'policy_decision',
+        correlation_id: 'correlation_fixture_1',
+        payload: { decision: 'deny', reason: 'approval_timeout' },
+      },
+      {
+        ...fixture.events[3],
+        sequence: 4,
+        type: 'tool_result',
+        correlation_id: 'correlation_fixture_1',
+        payload: { result: { status: 'timeout', text: 'timed out', timed_out: true } },
+      },
+      {
+        ...fixture.events[3],
+        sequence: 5,
+        type: 'turn_end',
+        correlation_id: null,
+        payload: { state: 'COMPLETED_TURN', assistant_text: 'done' },
+      },
+    ]
+    for (const event of events) {
+      state = reduceSession(state, { type: 'EVENT', event })
+    }
+
+    expect(state.pendingApproval).toBeNull()
+    expect(state.status).toBe('COMPLETED_TURN')
+    expect(state.status).not.toBe('FAILED')
+    expect(commandGateFor(state).canSubmitTask).toBe(true)
+  })
 })
