@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Execute（T01 已验收；其余任务串行派发中）
+> 状态：Execute（T01–T02 已验收；其余任务串行派发中）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -46,7 +46,7 @@ flowchart TD
 
 ## 阶段 B：状态核（列表 + 恢复旅程）
 
-### [ ] T02 — 交付 resume 旅程与历史事件 hydration
+### [x] T02 — 交付 resume 旅程与历史事件 hydration
 
 **依赖：** T01
 **范围：** 在 `web/src/composables/useAgentSession.ts` 新增 `resumeSession(historySessionId)`：按 `ARCHITECTURE.md` §3.2 顺序执行「终结当前 transport session（DELETE，幂等，404/410 视为已关闭）→ `RESET` 投影 → `POST /sessions {resume_session_id}` 创建恢复 session → 从 `since=0` 分页 `readSessionHistoryEvents` 把 canonical envelope 逐条经 `EVENT` action 送入既有 reducer 直至 `has_more=false` → 从 reducer 当前 cursor 起 `startEvents()` 接续 live SSE」。复用既有 reducer/命令互斥/持久化，只持久化新 transport ID/cursor。排除侧边栏视图、`useSessionHistory` 与 App 布局。
@@ -60,6 +60,8 @@ flowchart TD
 - 新增 composable 级测试覆盖：正常切换、hydration 幂等/跳号、多页历史、先终结后创建失败 fail-closed、DELETE 幂等、POST 不重放、historySessionId 与 transport ID 不混用。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/composables`；`npm --prefix web run build`。
+
+**完成摘要（2026-09-01）：** 已交付 `resumeSession(historySessionId)`：先校验 canonical ID，再 `stopEvents` → DELETE 当前 transport（404/410 幂等）→ RESET → resume 创建 → 从 cursor 0 hydration → 从 reducer cursor 接续 SSE。`switching` 防重入；创建失败 fail-closed 不自动重建。主 Agent 复跑 lint/type-check/`test -- src/composables`（30 passed）/build 通过。未实现列表 composable 与视图。
 
 ### [ ] T03 — 交付历史列表状态与分页 composable
 

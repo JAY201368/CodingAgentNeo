@@ -6,7 +6,8 @@ import {
   AgentNetworkError,
   AgentRequestAbortedError,
 } from '../api/client'
-import type { AgentCommand, AgentEventStreamMessage, RuntimeState } from '../domain/protocol'
+import { isCanonicalSessionId } from '../domain/history'
+import type { AgentCommand, AgentEventEnvelope, AgentEventStreamMessage, RuntimeState } from '../domain/protocol'
 import {
   CommandGate,
   SessionAction,
@@ -151,6 +152,27 @@ function errorMessage(error: unknown): string {
   return 'Agent 请求失败'
 }
 
+/**
+ * The history client returns already-parsed domain envelopes. The session
+ * reducer still ingests untrusted wire JSON (`schema_version` / `session_id`).
+ * Re-encode at this boundary so hydration reuses the same EVENT path as SSE.
+ */
+function wireEventFromEnvelope(event: AgentEventEnvelope): Record<string, unknown> {
+  return {
+    schema_version: event.schemaVersion,
+    session_id: event.sessionId,
+    event_id: event.eventId,
+    agent_id: event.agentId,
+    parent_agent_id: event.parentAgentId,
+    sequence: event.sequence,
+    type: event.type,
+    correlation_id: event.correlationId,
+    provider_tool_call_id: event.providerToolCallId,
+    timestamp: event.timestamp,
+    payload: event.payload,
+  }
+}
+
 function isUncertainPostFailure(error: unknown): boolean {
   return error instanceof AgentNetworkError ||
     (error instanceof AgentRequestAbortedError && !(error instanceof AgentApiError))
@@ -192,7 +214,9 @@ export interface AgentSessionController {
   readonly transportSessionId: ComputedRef<string | null>
   readonly cursor: ComputedRef<number>
   readonly storedSession: ComputedRef<PersistedTransportSession | null>
+  readonly switching: Ref<boolean>
   readonly connect: (signal?: AbortSignal) => Promise<SessionState>
+  readonly resumeSession: (historySessionId: string, signal?: AbortSignal) => Promise<void>
   readonly startEvents: () => void
   readonly stopEvents: () => void
   readonly submitTask: (text: string, signal?: AbortSignal) => Promise<void>
@@ -224,6 +248,7 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
   const transportSessionId = computed(() => state.value.transportSessionId)
   const cursor = computed(() => state.value.cursor)
   const storedSession = computed(() => storedHint.value)
+  const switching = ref(false)
   let eventsAbortController: AbortController | null = null
   let eventsRun = 0
   let reconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
@@ -608,13 +633,109 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
     clearStoredHint()
   }
 
+  function requireHistorySessionId(historySessionId: string): string {
+    if (!isCanonicalSessionId(historySessionId)) {
+      throw new AgentApiError(400, 'invalid_history_id', 'history session ID is invalid')
+    }
+    return historySessionId
+  }
+
+  async function terminateCurrentTransport(signal?: AbortSignal): Promise<void> {
+    const id = state.value.transportSessionId
+    if (id === null) {
+      return
+    }
+    try {
+      await client.deleteSession(id, signal)
+    } catch (error) {
+      // DELETE is idempotent: a missing or already-closed transport session
+      // is a successful terminal state. A network failure cannot prove
+      // closure, so resume must not continue to POST.
+      if (!isUnavailableSessionError(error)) {
+        dispatch({ type: 'STREAM_ERROR', message: errorMessage(error) })
+        throw error
+      }
+    }
+  }
+
+  async function hydrateHistoryEvents(
+    historySessionId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let since = 0
+    while (true) {
+      const page = await client.readSessionHistoryEvents(historySessionId, { since, signal })
+      for (const event of page.events) {
+        dispatch({ type: 'EVENT', event: wireEventFromEnvelope(event) })
+      }
+      if (!page.has_more) {
+        return
+      }
+      if (page.next_cursor === null || page.next_cursor === since) {
+        return
+      }
+      since = page.next_cursor
+    }
+  }
+
+  async function resumeSession(
+    historySessionId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (switching.value) {
+      throw new SessionCommandError('正在切换 session')
+    }
+    // Reject mixed/unsafe IDs before any DELETE/POST so a bad click cannot
+    // terminate the current transport session or send a transport ID to
+    // history routes.
+    const canonicalId = requireHistorySessionId(historySessionId)
+    switching.value = true
+    stopEvents()
+    try {
+      await terminateCurrentTransport(signal)
+      dispatch({ type: 'RESET' })
+      let created
+      try {
+        created = await client.createSession(canonicalId, signal)
+      } catch (error) {
+        dispatch({
+          type: 'SESSION_UNAVAILABLE',
+          message: errorMessage(error),
+        })
+        throw error
+      }
+      // Resume response cursor is the restored file's last sequence. Binding
+      // it here would make every historical event look like a duplicate.
+      // Hydration always starts from reducer cursor 0.
+      dispatch({
+        type: 'CONNECTED',
+        transportSessionId: created.transport_session_id,
+        cursor: 0,
+        state: created.state,
+      })
+      persistCursor()
+      try {
+        await hydrateHistoryEvents(canonicalId, signal)
+      } catch (error) {
+        dispatch({ type: 'STREAM_ERROR', message: errorMessage(error) })
+        throw error
+      }
+      persistCursor()
+      startEvents()
+    } finally {
+      switching.value = false
+    }
+  }
+
   return {
     state,
     gate,
     transportSessionId,
     cursor,
     storedSession,
+    switching,
     connect,
+    resumeSession,
     startEvents,
     stopEvents,
     submitTask,

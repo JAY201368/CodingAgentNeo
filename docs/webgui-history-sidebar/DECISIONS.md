@@ -43,3 +43,15 @@
 - 选择：`readSessionHistoryEvents` 的 `since` 在发请求前要求 `Number.isSafeInteger` 且 `>= 0`（上限 `Number.MAX_SAFE_INTEGER`），而不是尝试表示 wire 的完整 `0..2^63-1`。
 - 理由与替代：JavaScript `number` 无法精确表示 2^63-1。把超安全整数的值编码进 query 会静默丢失精度。拒绝它们并映射 `invalid_history_cursor` 比发送错误 cursor 更安全。
 - 后果：超过 2^53-1 的 sequence 无法作为浏览器 `since` 发出；当前事件 sequence 从 1 递增，实际不会触及该上限。若未来需要全范围整数，须改用字符串十进制 query 并作为跨工作流契约变更。
+
+## 2026-09-01 — T02：非法 history ID 在终结当前 session 之前失败
+
+- 选择：`resumeSession` 先用 T01 的 `session_...` 校验拒绝非法/混用 ID（如 `../x`、transport ID、`.jsonl`），再进入 switching、DELETE 与 POST。
+- 理由与替代：任务卡顺序把 DELETE 写在 create 之前，但非法 ID 在发 POST/GET history 前就必须失败。若先 DELETE 再因非法 ID 失败，会无意义地终结当前活跃 session。替代方案是严格按字面先 DELETE，fail-closed 更重、对误点代价更大。
+- 后果：非法 ID 不改变当前 transport session，也不发任何 history/resume 请求。合法 ID 仍先 DELETE 再 POST，以遵守单活跃规则。
+
+## 2026-09-01 — T02：hydration 把 domain envelope 再编码为 wire 后走既有 EVENT
+
+- 选择：绑定新 transport 时 `CONNECTED` 的 cursor 固定为 `0`，resume 响应 cursor 只作 hydration 完成后的对照；`readSessionHistoryEvents` 返回的 camelCase domain envelope 在 dispatch 前再编码为 `schema_version`/`session_id` wire 对象。
+- 理由与替代：resume 响应 cursor 是恢复文件最后 sequence。若把它当作 reducer 起点，历史事件会被当成重复而全部忽略。T01 的 history parser 产出 domain envelope，而 reducer 的 `EVENT` 路径与 live SSE 一样只吃未信任 wire JSON。在 composable 边界再编码，可复用同一套幂等/跳号/未知/截断降级，避免第二套投影。替代方案是让 reducer 同时接受 camelCase，或让 T01 暴露原始 JSON——前者扩大 reducer 契约，后者回退 T01。
+- 后果：hydration 结束后 reducer cursor 收敛到恢复文件最后成功消费的 sequence；`startEvents()` 必须从该 cursor 订阅（`sequence > cursor`）。T05 接线时不要把 resume cursor 写入 reducer，也不要把 historySessionId 写入 localStorage。
