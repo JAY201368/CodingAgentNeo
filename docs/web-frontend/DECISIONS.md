@@ -69,3 +69,9 @@
 - 选择：每个 transport session 只建立一个从 canonical cursor `0` 读取 `AgentBackend.events()` 的事件 pump，并缓存该 session 的 canonical envelopes；每个 SSE 连接只注册可取消 subscriber，以自己的 cursor 过滤缓存和后续事件。
 - 理由与替代：若每个连接各自用线程阻塞读取 backend iterator，浏览器断开时无法从另一线程可靠关闭正在执行的 Python generator，反复重连会遗留 feeder；若 pump 从首个 subscriber cursor 开始，又会让后续更低 cursor 的合法重连丢失历史。session-owned pump 同时保持断线无 Agent 副作用和 `sequence > cursor` 补回语义。
 - 后果：SSE 断开只移除 subscriber，不发送 approval/interrupt/close，也不停止 Agent；event pump 与 transport session 同寿命并在显式 DELETE/服务关闭时清理。HTTP adapter 会持有一份 session 级 envelope 缓存，后续若改变事件保留策略，必须继续满足任意合法 cursor 的重订阅契约。
+
+## 2026-09-01 — Adapter binding 只保留一份前端权威规范
+
+- 选择：`docs/agent-transport-interface.md` 集中定义 In-process 与 HTTP/SSE 的公开 binding、HTTP 命令 JSON、EventEnvelope wire schema、事件目录、错误、安全和生命周期规则；删除重复的 `docs/agent-http-client.md`。Web 前端实现 adapter 接入时需要且只需要参考 transport 规范。
+- 理由与替代：单独的 HTTP client 文档重复端点、SSE、错误和生命周期，却没有独立契约含义，长期会与 transport 规范漂移。README 适合给出启动示例，但不是规范依赖或补充权威来源。
+- 后果：README、实现注释和测试只能链接 transport 规范，不得另行定义协议；Backend Service/adapter 实现者仍可同时读取内部 `agent-backend-interface.md`，普通前端不得把后端 Port 文档当作接入 API。

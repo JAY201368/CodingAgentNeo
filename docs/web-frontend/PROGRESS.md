@@ -7,7 +7,7 @@
 
 ## Current State
 
-- 2026-08-31 已完成 Bootstrap 及两轮 Change control：`docs/agent-backend-interface.md` 定义 Port 与共享 Backend Service 语义；`docs/agent-transport-interface.md` 独立定义并列 In-process/HTTP binding。前端只参考对应 binding 与共享 adapter 规则。
+- 2026-08-31 已完成 Bootstrap 及两轮 Change control：`docs/agent-backend-interface.md` 定义 Port 与共享 Backend Service 语义；`docs/agent-transport-interface.md` 是并列 In-process/HTTP binding、HTTP wire/event schema 与共享 adapter 规则的唯一前端接入权威。前端实现 adapter 接入时需要且只需要参考该文档。
 - 既有 Python Agent 后端与 CLI 基线保持不变；HTTP/SSE Agent binding 已可独立运行，仓库仍无 `web/` 或 Web 产品代码，不能声称 Web 前端可运行。
 - 当前增量已完成 T01/T02；T03 Web 工程及更后续任务未开始，不得提前声称 Web 客户端或静态组合入口可用。
 

@@ -1,14 +1,15 @@
 你正在 CodingAgentNeo 既有仓库中实施一张 Web 前端任务卡。
 
-开始前完整阅读：
+开始前完整阅读当前任务适用的文档：
 
 - `docs/web-frontend/AGENTS.md`
 - `docs/web-frontend/requirement.md`
 - `docs/web-frontend/ARCHITECTURE.md`
 - `docs/web-frontend/TASKS.md`
 - `docs/web-frontend/PROGRESS.md`
-- `docs/agent-backend-interface.md`：T01/T02 完整阅读；T10 为最终纯度/conformance 审计也必须完整阅读；纯 Web 任务不把它当作前端 API
-- `docs/agent-transport-interface.md`：T01/T02/T10 完整阅读；HTTP 前端接入任务阅读第 4 节 binding 和第 6 节共享规则
+- T01/T02/T10：完整阅读 `docs/agent-backend-interface.md` 和 `docs/agent-transport-interface.md`
+- T04～T09：只以 `docs/agent-transport-interface.md` 中适用的 HTTP/SSE binding、公开事件目录和共享规则作为接入规范，不读取后端 Port 文档来补充前端契约
+- T03：不需要读取 Python 后端或 adapter 接口规范
 
 只实现以下一张任务卡：
 

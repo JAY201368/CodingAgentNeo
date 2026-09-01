@@ -4,7 +4,7 @@
 
 ## 1. 开始工作前
 
-1. 完整阅读本文件、需求、架构、进度、当前任务和依赖摘要。T01/T02 必须阅读两份接口规范；T03 无需阅读任何 Python 接口；T04～T09 按任务阅读 HTTP binding 及适用的共享 adapter 规则，不把后端规范作为前端 API；T10 为审计 Port/Service/adapter 纯度与 conformance，必须阅读两份规范。
+1. 完整阅读本文件、需求、架构、进度、当前任务和依赖摘要。T01/T02 必须阅读两份接口规范；T03 无需阅读任何 Python/adapter 接口；T04～T09 需要且只需要参考 `../agent-transport-interface.md` 中适用的 HTTP binding、公开事件目录和共享规则，不读取后端 Port 文档来补充前端契约；T10 为审计 Port/Service/adapter 纯度与 conformance，必须阅读两份规范。
 2. 检查 `git status` 与相关文件；保留用户/其他 Agent 的无关改动，范围重叠先报告。
 3. 从 `[x]` 和仓库证据确认依赖，不得为未完成依赖发明替代实现。
 4. 修改前一句话复述当前任务范围和排除项，一次只处理一个任务 ID。

@@ -45,7 +45,6 @@ python -m pip install -e ".[dev,http]"
 coding-agent-neo-http --config .coding-agent-neo.toml
 ```
 
-It exposes only `/api/v1` on `127.0.0.1` (default port `8765`) and does not serve Vue/Vite
-static resources. See the [Agent HTTP/SSE client binding](docs/agent-http-client.md) for the
-wire, SSE cursor, command, error, and lifecycle contract. The API key remains in the Agent
-process environment and is never a command-line value or HTTP field.
+The [Agent adapter interface specification](docs/agent-transport-interface.md) is the sole
+authority for its binding, wire, event, error, security, configuration, and lifecycle contract;
+the README is not a supplementary specification.

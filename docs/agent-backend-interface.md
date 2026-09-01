@@ -12,7 +12,7 @@
 
 baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。后续增量会先把其中的共享 Backend Service/Runtime 与端口定义分离，再在该端口之上提供并列的 In-process 和 HTTP/SSE Adapter。两种 adapter 都依赖 `AgentBackend` Port，互不依赖。
 
-> 适配层接口规范见 [Agent 适配层接口规范](agent-transport-interface.md)。前端接入时只参考该文档中对应的 In-process 或 HTTP/SSE binding；adapter 实现者才需要同时阅读本文。在对应任务验收前，新增 adapter 仍只是规划。
+> [Agent 适配层接口规范](agent-transport-interface.md) 是前端接入的唯一权威文档。前端只参考其中对应的 In-process 或 HTTP/SSE binding，不需要阅读本文；只有 Backend Service 与 adapter 实现者需要本文定义的内部 Port 语义。
 
 ## 1. 后端端口边界与职责
 
