@@ -37,8 +37,10 @@ from coding_agent_neo.backend import (
     DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
     DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
     AgentBackend,
+    AgentBackendProvider,
 )
 from coding_agent_neo.backend_factory import AgentBackendFactory
+from coding_agent_neo.backend_provider import LocalAgentBackendProvider
 from coding_agent_neo.backend_service import (
     AgentBackendService,
     ApprovalChannel,
@@ -415,11 +417,15 @@ def _context_from_events(
     return summary, covered, degraded, notice, tuple(flattened)
 
 
-def recover_session_plan(path: Path) -> SessionResumePlan:
+def recover_session_plan(
+    path: Path,
+    *,
+    expected_session_id: SessionId | str | None = None,
+) -> SessionResumePlan:
     """Read one JSONL session and rebuild root Runtime facts without side effects."""
 
     try:
-        result = read_session(path)
+        result = read_session(path, expected_session_id=expected_session_id)
     except SessionFormatError:
         raise
     except SessionError as error:
@@ -492,7 +498,11 @@ def build_agent_backend(
     resume_plan: SessionResumePlan | None = None
     if resume is not None:
         resume_path = _locate_resume_file(config, resume)
-        resume_plan = recover_session_plan(resume_path)
+        # Revalidate the filename-selected identity at the same point where
+        # the backend is actually opened.  Provider preflight cannot close a
+        # replacement race on its own: a file swapped after preflight must
+        # still match the opaque resume ID or construction fails closed.
+        resume_plan = recover_session_plan(resume_path, expected_session_id=resume)
         if resume_plan.diagnostics:
             discard_incomplete_tail(resume_path)
         session_id = resume_plan.session_id
@@ -607,6 +617,55 @@ def build_agent_backend(
     )
 
 
+def build_agent_backend_provider(
+    config: AppConfig,
+    *,
+    interactive: bool = True,
+    model_client: Any | None = None,
+    environment: Any | None = None,
+    approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
+    event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
+    fsync: bool = True,
+) -> AgentBackendProvider:
+    """Build the workspace-scoped provider used by history-aware adapters.
+
+    The returned provider is the sole public application dependency for
+    listing/reading history and creating a new or resumed backend.  Concrete
+    service construction remains a composition concern captured by private
+    closures; callers never supply a repository or session path.
+    """
+
+    if not isinstance(interactive, bool):
+        raise TypeError("interactive must be a boolean")
+
+    def backend_factory(resume_session_id: str | None) -> AgentBackend:
+        return build_agent_backend(
+            config,
+            interactive=interactive,
+            resume=resume_session_id,
+            model_client=model_client,
+            environment=environment,
+            approval_timeout_seconds=approval_timeout_seconds,
+            worker_shutdown_timeout_seconds=worker_shutdown_timeout_seconds,
+            event_poll_timeout_seconds=event_poll_timeout_seconds,
+            fsync=fsync,
+        )
+
+    def resume_validator(path: Path, session_id: str) -> SessionResumePlan:
+        plan = recover_session_plan(path, expected_session_id=session_id)
+        registry = default_tool_registry()
+        if plan.active_tools - set(registry.registered_names):
+            raise SessionResumeError("session active tools are not registered")
+        return plan
+
+    return LocalAgentBackendProvider(
+        config.workspace,
+        backend_factory=backend_factory,
+        resume_validator=resume_validator,
+    )
+
+
 def build_in_process_adapter(
     config: AppConfig,
     *,
@@ -676,10 +735,12 @@ def build_local_backend(
 
 __all__ = [
     "AgentBackendFactory",
+    "AgentBackendProvider",
     "SYSTEM_PROMPT",
     "SessionResumeError",
     "SessionResumePlan",
     "build_agent_backend",
+    "build_agent_backend_provider",
     "build_in_process_adapter",
     "build_local_backend",
     "build_system_prompt",

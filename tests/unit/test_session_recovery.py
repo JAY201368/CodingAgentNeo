@@ -11,6 +11,7 @@ from tests.unit.fake_environment import FakeExecutionEnvironment
 
 from coding_agent_neo.assembly import (
     SessionResumeError,
+    build_agent_backend_provider,
     build_local_backend,
     recover_session_plan,
 )
@@ -478,7 +479,8 @@ def test_empty_file_and_missing_root_agent_fail(tmp_path: Path) -> None:
 
 
 def test_compaction_restores_summary_and_later_complete_groups_only(tmp_path: Path) -> None:
-    path = tmp_path / ".coding-agent-neo" / "sessions" / "session_compacted.jsonl"
+    session_id = "session_compacted"
+    path = tmp_path / ".coding-agent-neo" / "sessions" / f"{session_id}.jsonl"
     records = [
         envelope(1, "session_start", {"state": "RUNNING"}),
         envelope(
@@ -560,6 +562,8 @@ def test_compaction_restores_summary_and_later_complete_groups_only(tmp_path: Pa
             },
         ),
     ]
+    for record in records:
+        record["session_id"] = session_id
     write_records(path, records)
     plan = recover_session_plan(path)
     assert plan.latest_summary == "Summarized earlier work."
@@ -659,9 +663,63 @@ def test_local_environment_sees_no_historical_side_effects_during_resume(tmp_pat
     assert (workspace / "note.txt").read_text(encoding="utf-8") == "hello"
 
 
+def test_assembled_provider_resume_continues_sequence_without_replaying_effects(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    first_environment = RecordingLocalEnvironment(workspace)
+    path, _first_environment, _model = run_session(
+        tmp_path,
+        [write_call("note.txt", "hello"), NormalizedAssistantResponse(text="wrote")],
+        environment=first_environment,
+        task="write a note",
+    )
+    original_events = read_session(path).events
+    last_sequence = original_events[-1].sequence
+    assert first_environment.writes == ["note.txt"]
+
+    resumed_environment = RecordingLocalEnvironment(workspace)
+    provider = build_agent_backend_provider(
+        config(tmp_path),
+        interactive=False,
+        model_client=ScriptedModel([NormalizedAssistantResponse(text="still here")]),
+        environment=resumed_environment,
+        worker_shutdown_timeout_seconds=SHORT_SHUTDOWN,
+        event_poll_timeout_seconds=SHORT_POLL,
+        fsync=False,
+    )
+    backend = provider.create_session(resume_session_id=path.stem)
+    try:
+        assert backend.resume_last_sequence == last_sequence
+        assert resumed_environment.writes == []
+        assert resumed_environment.commands == []
+        backend.send(SubmitTask("status"))
+        wait_session(
+            tmp_path,
+            lambda event: event.type == EventType.TURN_END and event.sequence > last_sequence,
+        )
+    finally:
+        backend.close()
+
+    events = read_session(path).events
+    assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+    follow_up = [event for event in events if event.sequence > last_sequence]
+    assert follow_up[0].sequence == last_sequence + 1
+    assert any(
+        event.type == EventType.USER_MESSAGE and event.payload.get("text") == "status"
+        for event in follow_up
+    )
+    assert any(event.type == EventType.TURN_END for event in follow_up)
+    assert resumed_environment.writes == []
+    assert resumed_environment.commands == []
+    assert (workspace / "note.txt").read_text(encoding="utf-8") == "hello"
+
+
 def test_interrupted_session_resumes_with_fresh_cancellation(tmp_path: Path) -> None:
-    path = tmp_path / ".coding-agent-neo" / "sessions" / "session_interrupted.jsonl"
-    records = minimal_session_records()
+    session_id = "session_interrupted"
+    path = tmp_path / ".coding-agent-neo" / "sessions" / f"{session_id}.jsonl"
+    records = minimal_session_records(session_id=session_id)
     records.append(
         envelope(
             6,
@@ -676,6 +734,7 @@ def test_interrupted_session_resumes_with_fresh_cancellation(tmp_path: Path) -> 
                     "output_tokens": 2,
                 },
             },
+            session_id=session_id,
         )
     )
     write_records(path, records)

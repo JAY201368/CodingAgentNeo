@@ -31,3 +31,9 @@ Add only durable, non-obvious decisions with downstream consequences.
 - Choice: `AppConfig` carries only the resolved workspace; assembly derives every production session file as `<workspace>/.coding-agent-neo/sessions/<session_id>.jsonl`, and resume accepts only a strict opaque `session_...` ID.
 - Rationale and rejected alternative: retaining a path-or-ID resolver would preserve a caller-controlled persistence boundary and allow records from unrelated workspaces to be resumed.
 - Consequences: legacy TOML, `CODING_AGENT_NEO_SESSION_DIR`, and CLI `--session-dir` inputs are rejected as unknown configuration; resume hints contain only the ID; direct path-based recovery remains available solely through the internal `recover_session_plan(path)` test seam for malformed-record coverage. Existing custom directories are neither discovered nor migrated.
+
+## 2026-09-01 — T03 keeps history projection behind one provider
+
+- Choice: the public provider port owns immutable bounded DTOs and stable safe errors, while a composition-owned fixed-directory repository parses canonical JSONL and captures short-lived opaque list cursors; event pages lower payload preview bounds when necessary to keep the complete response under 8 MiB.
+- Rationale and rejected alternative: keeping repository access and resume validation inside the provider prevents adapters from opening paths or reconstructing session facts, and projection at the envelope payload preserves canonical IDs and sequence without returning raw JSONL.
+- Consequences: listing isolates malformed candidates as bounded diagnostics, direct reads/resumes revalidate the current fixed file, incomplete tails remain resumable with diagnostics, and T04/T05 must bind their adapters to the provider rather than the repository or backend factory.

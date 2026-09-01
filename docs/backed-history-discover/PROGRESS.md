@@ -4,10 +4,11 @@
 
 - T01 — Backend and transport specifications now define one workspace-scoped provider, bounded history summaries/event pages, fixed-path opaque-ID resume, equivalent In-process/HTTP bindings, and stable safe errors; structural and existing architecture/transport tests passed.
 - T02 — Production configuration and launchers no longer expose a session directory; new/resumed JSONL is confined to the fixed workspace repository with opaque-ID and symlink/containment checks.
+- T03 — Workspace-scoped provider, immutable history DTOs/errors, private fixed-directory discovery, bounded first-root-message/event projections, opaque snapshot cursors, and strict provider-controlled new/resume creation are accepted.
 
 ## Current State
 
-- T01 and T02 are accepted. Fixed-path persistence is implemented; the workspace-scoped history provider and DTO behavior remain unimplemented until T03.
+- T01–T03 are accepted. Backend history and resume behavior is implemented; adapters still expose the baseline surfaces until T04/T05.
 
 ## Known Issues
 
@@ -17,4 +18,4 @@
 
 ## Next Recommended Task
 
-- T03 — Implement backend-owned history discovery, bounded event pages, first-message summaries, and provider-controlled new/resumed backend creation; T01 and T02 are checked and evidenced.
+- T04 — Expose the accepted provider through the canonical In-process workspace binding; T01–T03 are checked and evidenced.

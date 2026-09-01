@@ -55,7 +55,7 @@ flowchart TD
 
 **Completed 2026-09-01:** Removed production `session_dir` and `--session-dir`, derived new/resumed records only from `<resolved workspace>/.coding-agent-neo/sessions/`, restricted resume to opaque IDs, and rejected existing symlink components/containment escapes without writing outside the workspace. Main-agent verification: focused matrix reported 65 passed with one third-party Starlette warning; Ruff check and format-check passed; `git diff --check` passed. Worker full-suite evidence reported 297 passed with the same warning.
 
-### [ ] T03 — Provide backend-owned history discovery and resume creation
+### [x] T03 — Provide backend-owned history discovery and resume creation
 
 **Dependencies:** T02  
 **Scope:** Implement the public workspace-scoped provider/DTO/exception contract, fixed-directory history repository, bounded summary projection including the first user message, bounded canonical event pages, and new/resumed session creation. Reuse canonical session parsing and recovery. Do not add HTTP routes, CLI UI, or Web UI.  
@@ -68,6 +68,8 @@ flowchart TD
 - Unit, security, backend, recovery, and architecture tests cover healthy, empty, malformed, incomplete-tail, traversal, symlink, oversized text, unknown ID, and append-snapshot cases.
 
 **Verification:** `python -m pytest tests/unit/test_session_history.py tests/unit/test_backend_provider.py tests/unit/test_session_recovery.py tests/security tests/architecture -q`; `python -m ruff check src tests`; `python -m ruff format --check src tests`.
+
+**Completed 2026-09-01:** Implemented the public provider/DTO/error port, private fixed-directory repository, deterministic snapshot pagination, bounded first-root-user-message and canonical event projections, safe candidate isolation, strict identity revalidation, and provider-controlled new/resumed backends without replay. Main-agent verification: T03 matrix reported 57 passed; Ruff check/format, workflow validator, and `git diff --check` passed. Worker full-suite evidence reported 322 passed. Acceptance corrections removed repository re-export bypasses and covered append snapshots, root filtering, 200-large-event aggregate bounds, symlinked roots, replacement races, and assembled Resume sequence/effect behavior.
 
 ## Stage C: Adapter bindings
 

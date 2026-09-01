@@ -216,7 +216,18 @@ def read_session(
     if not session_path.exists():
         return SessionReadResult(())
     try:
-        data = session_path.read_bytes()
+        # Refuse a final symlink even if it points back inside the workspace.
+        # The repository performs its own component checks; ``O_NOFOLLOW``
+        # closes the replacement race between that check and this read.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(session_path, flags)
+        try:
+            with os.fdopen(descriptor, "rb") as handle:
+                descriptor = -1
+                data = handle.read()
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
     except OSError:
         raise SessionError("session file could not be read") from None
     if not data:
