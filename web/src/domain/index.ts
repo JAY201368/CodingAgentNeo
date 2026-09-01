@@ -53,3 +53,5 @@ export type {
   SessionStatusResponse,
   SubmitTaskCommand,
 } from './protocol'
+export { projectTimeline } from './timeline'
+export type { TimelineItem, TimelineItemKind } from './timeline'

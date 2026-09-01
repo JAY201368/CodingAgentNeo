@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：T01～T04 已验收；T05～T10 待串行实施
+> 状态：T01～T05 已验收；T06～T10 待串行实施
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -108,7 +108,7 @@ flowchart TD
 
 ## 阶段 C：Web 核心用户旅程
 
-### [ ] T05 — 交付任务、assistant 回复与事件时间线闭环
+### [x] T05 — 交付任务、assistant 回复与事件时间线闭环
 
 **依赖:** T04
 **范围:** 将 session 核接入 Vue 页面，交付创建 transport session、任务 composer、用户消息、assistant 文本、通用事件/错误和 turn 完成反馈的首个纵向闭环。排除 approval 操作、精细工具卡、刷新重连和最终视觉。
@@ -122,6 +122,8 @@ flowchart TD
 - scripted fake model 经真实 Backend Service + HTTP adapter 完成一次无授权任务到 `turn_end`；真实 API 未执行则明确记录。
 
 **验证:** `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; `.venv/bin/python -m pytest tests/transports tests/integration/test_frontend_contract.py`。
+
+**完成摘要（2026-09-01）:** 已将 T04 session 核接入 Vue，交付自动创建 transport session、非空任务 composer、重复提交锁、按 sequence 的用户/assistant/运行/错误/结束时间线、`turn_end.assistant_text` 优先的最终回复以及 COMPLETED_TURN follow-up/终止态 gate。长文本以纯文本有界展示并可展开，未知/缺失/截断 payload 降级，普通 tool failure 不改写 session FAILED；稳定 400/409/410 code 均映射为安全提示，POST 不重放。主 Agent 复核：Web 24 passed、lint/type-check/build、transport + frontend contract 19 passed及静态安全/diff 扫描均通过；Python 集成需显式 `NO_PROXY/no_proxy=127.0.0.1,localhost` 避开本机代理，仅有 Starlette 弃用警告。scripted fake 经真实 Backend Service + HTTP adapter 验证无授权 turn 到 `turn_end`；未执行真实模型、真实浏览器或公网部署，approval、精细工具卡和刷新重连留待后续卡。
 
 ### [ ] T06 — 交付工具生命周期、授权与主动中断
 
