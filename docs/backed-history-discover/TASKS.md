@@ -73,7 +73,7 @@ flowchart TD
 
 ## Stage C: Adapter bindings
 
-### [ ] T04 — Expose history through the In-process binding
+### [x] T04 — Expose history through the In-process binding
 
 **Dependencies:** T03  
 **Scope:** Adapt the In-process composition/binding so controlled Python frontends can list history, read event pages, and create a new or resumed per-session adapter exclusively through the provider contract. Preserve existing direct CLI resume behavior after the removed path/config options. Do not add an interactive CLI picker or modify Web code.  
@@ -85,6 +85,8 @@ flowchart TD
 - CLI subprocess tests prove existing `--resume SESSION_ID` still works and explicit paths/removed `--session-dir` are rejected.
 
 **Verification:** `python -m pytest tests/unit/test_in_process_transport.py tests/transports/test_adapter_conformance.py tests/integration/test_cli.py tests/integration/test_resume_cli.py -q`; `python -m ruff check src tests`; `python -m ruff format --check src tests`.
+
+**Completed 2026-09-01:** Added the canonical pre-session `InProcessWorkspaceBinding`, provider-only history/read/create delegation, provider-routed compatibility builders, and preserved per-session lifecycle/resume metadata and CLI opaque-ID behavior. Main-agent verification: focused matrix reported 30 passed; Ruff check/format, workflow validator, and `git diff --check` passed. Reusable conformance exercises real fixed JSONL listing/event bounds, typed invalid inputs, Resume cursor/sequence continuation, and no historical message replay; composition spies prove exactly one provider/create path. Worker full-suite evidence reported 325 passed with one third-party Starlette warning.
 
 ### [ ] T05 — Expose finite history and resume through HTTP
 

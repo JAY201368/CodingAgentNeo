@@ -14,6 +14,7 @@ from coding_agent_neo.assembly import (
     build_agent_backend,
     build_agent_backend_provider,
     build_in_process_adapter,
+    build_in_process_workspace_binding,
     build_local_backend,
     build_system_prompt,
     recover_session_plan,
@@ -154,7 +155,7 @@ from coding_agent_neo.session import (
     SessionWriteError,
     read_session,
 )
-from coding_agent_neo.transports.in_process import InProcessAdapter
+from coding_agent_neo.transports.in_process import InProcessAdapter, InProcessWorkspaceBinding
 
 __version__ = "0.1.0"
 
@@ -275,6 +276,7 @@ __all__ = [
     "IncompleteSessionTailError",
     "Interrupt",
     "InProcessAdapter",
+    "InProcessWorkspaceBinding",
     "LocalAgentBackend",
     "SubmitTask",
     "TurnInProgressError",
@@ -282,6 +284,7 @@ __all__ = [
     "build_agent_backend",
     "build_agent_backend_provider",
     "build_in_process_adapter",
+    "build_in_process_workspace_binding",
     "build_system_prompt",
     "SubscriberDelivery",
     "ToolCall",

@@ -5,10 +5,11 @@
 - T01 — Backend and transport specifications now define one workspace-scoped provider, bounded history summaries/event pages, fixed-path opaque-ID resume, equivalent In-process/HTTP bindings, and stable safe errors; structural and existing architecture/transport tests passed.
 - T02 — Production configuration and launchers no longer expose a session directory; new/resumed JSONL is confined to the fixed workspace repository with opaque-ID and symlink/containment checks.
 - T03 — Workspace-scoped provider, immutable history DTOs/errors, private fixed-directory discovery, bounded first-root-message/event projections, opaque snapshot cursors, and strict provider-controlled new/resume creation are accepted.
+- T04 — Canonical provider-backed In-process workspace binding and provider-routed compatibility builders are accepted with reusable history/resume conformance.
 
 ## Current State
 
-- T01–T03 are accepted. Backend history and resume behavior is implemented; adapters still expose the baseline surfaces until T04/T05.
+- T01–T04 are accepted. In-process frontends can discover/read/resume through the unified provider; HTTP remains at the baseline until T05.
 
 ## Known Issues
 
@@ -18,4 +19,4 @@
 
 ## Next Recommended Task
 
-- T04 — Expose the accepted provider through the canonical In-process workspace binding; T01–T03 are checked and evidenced.
+- T05 — Add finite provider-backed HTTP history routes and `resume_session_id` creation; T01–T04 are checked and evidenced.

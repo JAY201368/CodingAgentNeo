@@ -2,9 +2,10 @@
 
 The assembly layer is the only place that constructs the explicit system
 prompt and the backend object graph (Runtime, Environment, Store, Loop,
-Event Stream, Channel Approval Port).  ``build_agent_backend`` returns the
-shared service port; ``build_in_process_adapter`` wraps it in the thin Python
-binding used by the CLI.  Frontends must not hold the inner objects.
+Event Stream, Channel Approval Port).  ``build_agent_backend`` remains the
+shared service construction seam used by the provider; the canonical Python
+frontend entry point is ``build_in_process_workspace_binding``.  Frontends
+must not hold the inner objects.
 
 Injectable timeouts (defaults are documented in ``backend.py``):
 
@@ -28,7 +29,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 from uuid import uuid4
 
 from coding_agent_neo.agent_loop import AgentLoop
@@ -38,6 +39,11 @@ from coding_agent_neo.backend import (
     DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
     AgentBackend,
     AgentBackendProvider,
+    AgentBackendProviderError,
+    InvalidSessionHistoryIdError,
+    SessionHistoryNotFoundError,
+    SessionHistoryUnavailableError,
+    SessionResumeUnavailableError,
 )
 from coding_agent_neo.backend_factory import AgentBackendFactory
 from coding_agent_neo.backend_provider import LocalAgentBackendProvider
@@ -70,7 +76,10 @@ from coding_agent_neo.session import (
     resolve_session_path,
 )
 from coding_agent_neo.tools.registry import default_tool_registry
-from coding_agent_neo.transports.in_process import InProcessAdapter
+from coding_agent_neo.transports.in_process import (
+    InProcessAdapter,
+    InProcessWorkspaceBinding,
+)
 
 SYSTEM_PROMPT = """You are CodingAgentNeo, a local coding assistant. Work only on the user's task.
 Use native tool calls to inspect, edit, and validate the configured workspace. Prefer small,
@@ -489,7 +498,7 @@ def build_agent_backend(
 
     ``model_client``, ``environment``, timeout, and ``fsync`` parameters are
     test/embedded seams.  Normal frontends should use
-    :func:`build_in_process_adapter` and leave them at their defaults.
+    :func:`build_in_process_workspace_binding` and leave them at their defaults.
     """
 
     if not isinstance(interactive, bool):
@@ -666,6 +675,118 @@ def build_agent_backend_provider(
     )
 
 
+def _build_in_process_workspace_binding(
+    config: AppConfig,
+    *,
+    interactive: bool,
+    model_client: Any | None = None,
+    environment: Any | None = None,
+    approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    worker_shutdown_timeout_seconds: float = DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
+    event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
+    fsync: bool = True,
+) -> InProcessWorkspaceBinding:
+    """Compose one provider-backed in-process workspace binding.
+
+    The optional arguments are internal test/embedded seams used by the
+    compatibility builders.  The public canonical builder below intentionally
+    exposes only the resolved config and interaction mode.
+    """
+
+    provider = _build_provider_for_binding(
+        config,
+        interactive=interactive,
+        model_client=model_client,
+        environment=environment,
+        approval_timeout_seconds=approval_timeout_seconds,
+        worker_shutdown_timeout_seconds=worker_shutdown_timeout_seconds,
+        event_poll_timeout_seconds=event_poll_timeout_seconds,
+        fsync=fsync,
+    )
+    return InProcessWorkspaceBinding(provider)
+
+
+def _build_provider_for_binding(
+    config: AppConfig,
+    *,
+    interactive: bool,
+    model_client: Any | None,
+    environment: Any | None,
+    approval_timeout_seconds: float,
+    worker_shutdown_timeout_seconds: float,
+    event_poll_timeout_seconds: float,
+    fsync: bool,
+) -> AgentBackendProvider:
+    """Call the provider builder with only explicitly overridden test seams."""
+
+    options: dict[str, Any] = {}
+    if model_client is not None:
+        options["model_client"] = model_client
+    if environment is not None:
+        options["environment"] = environment
+    if approval_timeout_seconds != DEFAULT_APPROVAL_TIMEOUT_SECONDS:
+        options["approval_timeout_seconds"] = approval_timeout_seconds
+    if worker_shutdown_timeout_seconds != DEFAULT_WORKER_SHUTDOWN_TIMEOUT_SECONDS:
+        options["worker_shutdown_timeout_seconds"] = worker_shutdown_timeout_seconds
+    if event_poll_timeout_seconds != DEFAULT_EVENT_POLL_TIMEOUT_SECONDS:
+        options["event_poll_timeout_seconds"] = event_poll_timeout_seconds
+    if fsync is not True:
+        options["fsync"] = fsync
+    return build_agent_backend_provider(config, interactive=interactive, **options)
+
+
+def _create_compat_session(
+    config: AppConfig,
+    provider: AgentBackendProvider,
+    resume_session_id: str | None,
+) -> AgentBackend:
+    """Preserve the baseline CLI error classes around provider failures."""
+
+    try:
+        return provider.create_session(resume_session_id=resume_session_id)
+    except InvalidSessionHistoryIdError as error:
+        raise ConfigError("resume target is invalid") from error
+    except SessionHistoryNotFoundError as error:
+        raise ConfigError("session file was not found") from error
+    except (SessionHistoryUnavailableError, SessionResumeUnavailableError) as error:
+        _raise_compat_provider_unavailable(config, resume_session_id, error)
+
+
+def _raise_compat_provider_unavailable(
+    config: AppConfig,
+    resume_session_id: str | None,
+    error: AgentBackendProviderError,
+) -> NoReturn:
+    """Map provider failures to the baseline compatibility error classes."""
+
+    if resume_session_id is None:
+        raise ConfigError("session storage path is invalid") from error
+    # A malformed fixed root (for example, a symlinked component) was a
+    # configuration failure before the provider boundary existed.  Reuse the
+    # composition-owned validator only to preserve that classification; the
+    # provider still owns all actual resume authorization and creation.
+    try:
+        _locate_resume_file(config, resume_session_id)
+    except ConfigError as config_error:
+        raise config_error from error
+    raise SessionResumeError("session cannot be resumed") from error
+
+
+def build_in_process_workspace_binding(
+    config: AppConfig,
+    *,
+    interactive: bool = True,
+) -> InProcessWorkspaceBinding:
+    """Build the canonical history-aware in-process workspace binding.
+
+    The returned binding has no selected session yet.  Callers can list/read
+    history and then explicitly call ``create_session`` for a new or resumed
+    per-session adapter.
+    """
+
+    return _build_in_process_workspace_binding(config, interactive=interactive)
+
+
 def build_in_process_adapter(
     config: AppConfig,
     *,
@@ -678,18 +799,11 @@ def build_in_process_adapter(
     event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
     fsync: bool = True,
 ) -> InProcessAdapter:
-    """Build the CLI's explicit in-process adapter composition.
+    """Build the legacy per-session facade through one provider/create call."""
 
-    The shared backend factory is invoked first and the returned port is then
-    injected into a thin :class:`InProcessAdapter`.  Keeping this wrapper in
-    the composition root prevents CLI callers from depending on service
-    implementation objects.
-    """
-
-    backend = build_agent_backend(
+    workspace_binding = _build_in_process_workspace_binding(
         config,
         interactive=interactive,
-        resume=resume,
         model_client=model_client,
         environment=environment,
         approval_timeout_seconds=approval_timeout_seconds,
@@ -697,7 +811,14 @@ def build_in_process_adapter(
         event_poll_timeout_seconds=event_poll_timeout_seconds,
         fsync=fsync,
     )
-    return InProcessAdapter(backend)
+    try:
+        return workspace_binding.create_session(resume_session_id=resume)
+    except InvalidSessionHistoryIdError as error:
+        raise ConfigError("resume target is invalid") from error
+    except SessionHistoryNotFoundError as error:
+        raise ConfigError("session file was not found") from error
+    except (SessionHistoryUnavailableError, SessionResumeUnavailableError) as error:
+        _raise_compat_provider_unavailable(config, resume, error)
 
 
 def build_local_backend(
@@ -712,18 +833,11 @@ def build_local_backend(
     event_poll_timeout_seconds: float = DEFAULT_EVENT_POLL_TIMEOUT_SECONDS,
     fsync: bool = True,
 ) -> AgentBackend:
-    """Compatibility facade for baseline callers.
+    """Compatibility facade that creates a backend through one provider call."""
 
-    This legacy name intentionally returns the same ``AgentBackendService``
-    produced by the shared factory; it does not maintain a second backend
-    implementation.  New CLI/composition callers should use
-    :func:`build_in_process_adapter` to make the binding explicit.
-    """
-
-    return build_agent_backend(
+    provider = _build_provider_for_binding(
         config,
         interactive=interactive,
-        resume=resume,
         model_client=model_client,
         environment=environment,
         approval_timeout_seconds=approval_timeout_seconds,
@@ -731,6 +845,7 @@ def build_local_backend(
         event_poll_timeout_seconds=event_poll_timeout_seconds,
         fsync=fsync,
     )
+    return _create_compat_session(config, provider, resume)
 
 
 __all__ = [
@@ -741,6 +856,7 @@ __all__ = [
     "SessionResumePlan",
     "build_agent_backend",
     "build_agent_backend_provider",
+    "build_in_process_workspace_binding",
     "build_in_process_adapter",
     "build_local_backend",
     "build_system_prompt",

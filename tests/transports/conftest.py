@@ -6,20 +6,34 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from tests.unit.fake_environment import FakeExecutionEnvironment
-from tests.unit.test_backend import ScriptedModel
+from tests.unit.test_backend import ScriptedModel, wait_session
 
-from coding_agent_neo.assembly import build_agent_backend, build_in_process_adapter
+import coding_agent_neo.assembly as assembly
+from coding_agent_neo.assembly import (
+    build_agent_backend,
+    build_in_process_adapter,
+    build_in_process_workspace_binding,
+)
 from coding_agent_neo.backend import (
     AgentBackend,
     BackendClosedError,
+    CloseSession,
+    SubmitTask,
     TurnInProgressError,
 )
 from coding_agent_neo.config import AppConfig
-from coding_agent_neo.models import EventEnvelope, NormalizedAssistantResponse, RuntimeState
+from coding_agent_neo.models import (
+    EventEnvelope,
+    EventType,
+    NormalizedAssistantResponse,
+    RuntimeState,
+)
+from coding_agent_neo.session import read_session
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -28,6 +42,83 @@ def _config(tmp_path: Path) -> AppConfig:
         api_key="placeholder",
         context_window=8000,
         reserved_output_tokens=1000,
+    )
+
+
+@dataclass(frozen=True)
+class WorkspaceHistoryScenario:
+    """Reusable provider-backed history scenario for adapter conformance."""
+
+    binding: object
+    session_id: str
+    session_path: Path
+    original_last_sequence: int
+    model: ScriptedModel
+
+
+@pytest.fixture(params=("in_process",))
+def history_binding(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> WorkspaceHistoryScenario:
+    """Build a fixed-directory history fixture through the canonical binding.
+
+    T05 can extend the parameter set with an HTTP binding that presents the
+    same finite history/create surface; the conformance scenarios remain
+    provider- and transport-agnostic.
+    """
+
+    if request.param != "in_process":  # pragma: no cover - extension guard for T05
+        raise AssertionError(f"unsupported history binding: {request.param}")
+
+    config = _config(tmp_path)
+    model = ScriptedModel(
+        [
+            NormalizedAssistantResponse(text="history seed"),
+            NormalizedAssistantResponse(text="history follow-up"),
+        ]
+    )
+    real_provider_builder = assembly.build_agent_backend_provider
+
+    def provider_builder(config_value, *, interactive):
+        return real_provider_builder(
+            config_value,
+            interactive=interactive,
+            model_client=model,
+            environment=FakeExecutionEnvironment(),
+            worker_shutdown_timeout_seconds=2.0,
+            event_poll_timeout_seconds=0.05,
+            fsync=False,
+        )
+
+    monkeypatch.setattr(assembly, "build_agent_backend_provider", provider_builder)
+    binding = build_in_process_workspace_binding(config, interactive=False)
+    seeded = binding.create_session()
+    try:
+        seeded.send(SubmitTask("remember history"))
+        wait_session(tmp_path, lambda event: event.type == EventType.TURN_END)
+    finally:
+        try:
+            seeded.send(CloseSession("history_seed_done"))
+        except BackendClosedError:
+            pass
+        seeded.close()
+
+    session_path = next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
+    original_last_sequence = read_session(session_path).last_valid_sequence
+    assert original_last_sequence is not None
+    session_id = session_path.stem
+
+    # The public canonical entry intentionally exposes no model/environment
+    # injection seams; the patched composition seam above keeps this scenario
+    # on the real provider while using deterministic test dependencies.
+    return WorkspaceHistoryScenario(
+        binding=binding,
+        session_id=session_id,
+        session_path=session_path,
+        original_last_sequence=original_last_sequence,
+        model=model,
     )
 
 

@@ -37,3 +37,9 @@ Add only durable, non-obvious decisions with downstream consequences.
 - Choice: the public provider port owns immutable bounded DTOs and stable safe errors, while a composition-owned fixed-directory repository parses canonical JSONL and captures short-lived opaque list cursors; event pages lower payload preview bounds when necessary to keep the complete response under 8 MiB.
 - Rationale and rejected alternative: keeping repository access and resume validation inside the provider prevents adapters from opening paths or reconstructing session facts, and projection at the envelope payload preserves canonical IDs and sequence without returning raw JSONL.
 - Consequences: listing isolates malformed candidates as bounded diagnostics, direct reads/resumes revalidate the current fixed file, incomplete tails remain resumable with diagnostics, and T04/T05 must bind their adapters to the provider rather than the repository or backend factory.
+
+## 2026-09-01 — T04 makes the In-process workspace binding provider-backed
+
+- Choice: `build_in_process_workspace_binding(config, interactive=...)` returns a pre-session `InProcessWorkspaceBinding`; its list/read/create methods delegate only to one workspace-scoped `AgentBackendProvider`, and compatibility builders create exactly one provider-owned session.
+- Rationale and rejected alternative: constructing a backend directly in a compatibility builder would leave a second composition path that bypasses the history contract; the binding keeps history selection and per-session lifecycle behind the same provider while preserving the baseline CLI facade.
+- Consequences: controlled Python callers can page history before creating a session, resumed adapters retain `resume_last_sequence`/`resume_diagnostics`, and CLI opaque-ID/error behavior remains compatible while HTTP remains a separate T05 binding.
