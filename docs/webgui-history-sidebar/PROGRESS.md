@@ -8,9 +8,24 @@
 - T04 — 展示型历史侧边栏：按序渲染有界摘要，不可恢复项可见但不 emit select，switching 禁用选择，error !== null 即错误态。无 v-html。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/components`（20 passed）/build 通过。未改 App.vue。
 - T05 — sidebar + 右侧居中主区与恢复旅程接线：标题在侧边栏顶部；`select` 接到 `resumeSession`；switching 锁定 composer；失败 fail-closed 并给出新建入口；活跃 turn 一次确认。2026-09-01 主 Agent 复跑 lint/type-check/`test`（120 passed）/build 通过。窄屏抽屉与视觉打磨留 T06。
 - T06 — Codex 式侧边栏视觉、响应式与可访问性：640px 起 overlay 抽屉；汉堡 `aria-expanded`/`aria-controls`；Escape/遮罩关闭；状态不只靠颜色。2026-09-02 主 Agent 复跑 lint/type-check/`test`（123 passed）/build 通过。独立浏览器：桌面 1379px 无溢出、无汉堡、侧边栏 288px；360px 无溢出，「历史」打开后 sidebarLeft=0，Escape 关闭。未声称真实 resume 通过。
+- T07 — 端到端验收、运行文档与回归门：对照表见 [acceptance.md](acceptance.md)；README 覆盖侧边栏先 DELETE 再 resume；静态扫描无 `v-html`/Python import/误用 fetch。2026-09-02 主 Agent 复跑 Web 124 passed、acceptance 59 passed、四份 workflow validator 通过。全量 pytest 346 passed / 1 failed（本机 ignored 配置未知选项；隔离 `CODING_AGENT_NEO_CONFIG` 后该用例通过）。未跑真实模型/真实浏览器 resume。
 
 ## Current State
 
+- T07 已验收。工作流 T01–T07 全部完成。
+  - scripted Web 旅程由既有 Vitest 覆盖，对照见 [acceptance.md](acceptance.md)；T07 仅补 App 级分页接线（`lists history and pages with the opaque next_cursor`）。
+  - README Local runtime 说明侧边栏列出当前 workspace 可 resume session；点击先 DELETE 当前 transport session，再以 `resume_session_id` 创建；历史由有限 JSON 读取补齐，SSE 不 replay；单活跃 session；失败不自动重建；不提交 API Key。
+  - 静态边界：`web/src` 无 `v-html`、无 Python import、仅 `client.ts` 调用 `fetch(`；localStorage 只经 `savePersistedTransportSession` 写 transport ID/cursor。T04 spec 曾把字面量 `v-html` 写进断言，导致既有 T10 全源码扫描失败；已改为 `'v-' + 'html'` 拼接，产品代码未使用该指令。
+  - Worker 验证（2026-09-02）：
+    - `npm --prefix web run lint` 通过
+    - `npm --prefix web run type-check` 通过
+    - `npm --prefix web run test` **124 passed**
+    - `npm --prefix web run build` 通过
+    - `.venv/bin/python -m pytest` **346 passed / 1 failed**（`tests/integration/test_resume_cli.py::test_main_corrupt_session_is_startup_failure`）。失败原因是仓库根目录被 gitignore 的 `.coding-agent-neo.toml` 仍含已移除的 `session_dir`，CLI 读到 unknown option 返回 EXIT_CONFIG(2)。`CODING_AGENT_NEO_CONFIG` 指向不存在文件时该用例通过。非本工作流引入，未改 Python。仅有第三方 StarletteDeprecationWarning。
+    - `.venv/bin/python -m pytest tests/acceptance -m acceptance` **59 passed**（含新增 3 项静态扫描）
+    - workflow validator：`docs/webgui-history-sidebar` 7 tasks OK；`.codex` 同路径亦 OK；前序 `docs/baseline` 14、`docs/web-frontend` 10、`docs/backend-history-discover` 6 均 OK
+    - `git diff --check` 通过；git tracked 无 `web/dist`、`node_modules`、`.env`、真实 session
+  - 不勾选 TASKS。未执行真实模型网关或真实浏览器 resume。
 - T06 已验收。可观察行为：
   - 桌面（≥641px）：侧边栏占文档流 18rem，汉堡不渲染；主区在侧边栏右侧居中；composer `left: var(--sidebar-width)`。
   - 窄屏（≤640px）：侧边栏默认移出文档流（overlay）；「历史」按钮 `aria-controls="history-sidebar"`；打开后滑入（reduced-motion 下近乎瞬间）、半透明遮罩点击关闭、Escape 关闭并焦点回到按钮；主区 `.app-shell` `inert`。选择 session 后关闭抽屉。状态不写 localStorage。
@@ -49,9 +64,10 @@
 - resume + live SSE 不 replay 历史事件；目标 session 历史消息由有限历史读取 hydration 后再接续 SSE。T02 覆盖幂等/跳号/多页/截断/未知事件；T05 已把 hydration 结果接到主区 timeline。
 - 活跃 turn/等待授权时切换的一次 `window.confirm` 仍为可逆假设（默认仍终结当前）；若用户希望「运行中也直接无提示切换」或「运行中禁止切换」，须更新 `requirement.md`、`ARCHITECTURE.md` 与 DECISIONS。
 - 视觉「参考 Codex 设计」为方向性描述；T06 已落地 640px overlay 抽屉、紫金信息层级与人工 1280/360 证据。南大金色仍为产品可访问 token，非校方官方 HEX。
-- 真实模型网关、真实浏览器与公网部署不在本轮；相关证据只能标注为离线/脚本化，不得冒充真实验证。
+- 真实模型网关、真实浏览器端到端 resume 与公网部署不在本轮执行；相关证据只能标注为离线/脚本化，不得冒充真实验证。T06 的 1280/360 布局检查不替代 resume 状态机证据。
 - 浏览器 `since` 只能精确表示 `Number.MAX_SAFE_INTEGER`（2^53-1）以内的整数，是 wire `0..2^63-1` 的 JS 安全子集；超出安全整数的值在发请求前按 `invalid_history_cursor` 拒绝。
+- 本机被 gitignore 的 `.coding-agent-neo.toml` 仍含已移除的 `session_dir`，会使部分 CLI `main()` 测试在未设置 `CODING_AGENT_NEO_CONFIG` 时读到 unknown option。不在本工作流修复范围。
 
 ## Next Recommended Task
 
-- T07 — 完成端到端验收、运行文档与回归门。依赖 T06；只修复 T01–T06 集成缺陷，不改 Python 契约。
+- 无。`docs/webgui-history-sidebar/` T01–T07 已全部验收。

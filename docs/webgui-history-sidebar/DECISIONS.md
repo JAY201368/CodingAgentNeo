@@ -79,3 +79,9 @@
 - 选择：沿用既有 `@media (max-width: 640px)` 作为抽屉断点（不另开 720px）；窄屏侧边栏 `position: fixed` 滑出文档流，主区全宽，composer `left: 0`。打开/关闭只存在 App 内存（`matchMedia` + `historyDrawerOpen`），不写 localStorage。桌面不渲染汉堡按钮；窄屏打开时主区 `.app-shell` 设 `inert`，避免 Tab 落到遮罩后的控件。
 - 理由与替代：任务允许 640 或 720，扩展已有 640 规则可保留既有窄屏与 `prefers-reduced-motion` 策略。若侧边栏在窄屏仍占 18rem 文档流，固定 composer 会横向溢出。替代方案是 CSS-only `:target` 抽屉（键盘/Escape/测试更难）或把开关写入 localStorage（违反本工作流「列表/UI 态不持久化」）。
 - 后果：jsdom 测试通过 stub `matchMedia('(max-width: 640px)')` 断言汉堡出现与 Escape/遮罩关闭。真实浏览器 360px 无横向溢出；reduced-motion 下抽屉 transition 被既有全局规则压到约 0.01ms。T07 只核验本卡布局，不把离线视觉检查写成真实 resume。
+
+## 2026-09-02 — T07：scripted 验收以既有 Vitest 为权威，不新增 Python live Web UI 旅程
+
+- 选择：T07 把列出/分页/切换/fail-closed/hydration/follow-up/降级/ID 分离映射到既有 App/composable/client/history Vitest；只补 App 级「加载更多」接线。Python `tests/acceptance/test_webgui_history_sidebar_acceptance.py` 只扫描静态边界与 README，不启动浏览器、不调用真实模型。README 删除「there is no … server-restart Web resume」，改为描述侧边栏有限 JSON + `resume_session_id` 恢复路径。
+- 理由与替代：resume hydration 是浏览器 reducer 状态机，fake fetch 已覆盖顺序与 fail-closed；Python HTTP 历史/resume 已由 `docs/backend-history-discover/` 与 `tests/integration/test_http_history.py` 证明。再写一套 live HTTP「假装点侧边栏」的 Python 测试会复制 wire 而不增加 UI 证据。替代方案是 Playwright 真浏览器，本轮用户未提供未入库环境。
+- 后果：T07 完成态以 [acceptance.md](acceptance.md) 对照表 + Web 全量门 + 既有 Python 回归为准。未运行的真实模型/真实浏览器必须保持未声称。

@@ -72,6 +72,16 @@ Web UI and stop each process separately with Ctrl+C. This two-process mode is
 for development and uses the same loopback-only Agent API as the composition
 launcher.
 
+The Web UI history sidebar lists resumable sessions for the configured
+workspace. Clicking an item ends the current transport session with `DELETE`,
+then creates a restored session whose body is exactly
+`{"resume_session_id":"..."}`. Historical messages are filled in from the
+finite JSON history-read endpoints; live SSE does not replay history. Only
+one transport session may be active. If resume fails after the current
+session was ended, the UI stays fail-closed and does not recreate a session
+automatically. Never commit an API key, a real session, a private path, or
+`web/dist`.
+
 For a same-origin local demonstration, build the Web assets and start the
 separate composition root:
 
@@ -118,12 +128,15 @@ The Web package targets Node.js 20+ and npm 10+.
 
 All modes are intended for one local user and one linear transport session;
 there is no remote/public deployment, authentication, multi-user control
-plane, concurrent session, or server-restart Web resume. The browser stores
-only an opaque transport ID and event cursor for refresh reconnects while the
-Agent process is alive. It never receives an API key, and `--api-key` is not a
-supported option. Local `bash` inherits the launching user's permissions and
-is not an OS sandbox; review approval mode and workspace configuration before
-allowing commands.
+plane, or concurrent session. After a server or Agent-process restart, use the
+history sidebar to resume a workspace session through the finite history-read
+and `resume_session_id` create path described above; a browser refresh only
+reconnects a still-living transport session. The browser stores only an
+opaque transport ID and event cursor. It does not persist history session
+IDs, and it never receives an API key. `--api-key` is not a supported option.
+Local `bash` inherits the launching user's permissions and is not an OS
+sandbox; review approval mode and workspace configuration before allowing
+commands.
 
 The [Agent adapter interface specification](docs/agent-transport-interface.md) is the sole
 authority for its binding, wire, event, error, security, configuration, and lifecycle contract;

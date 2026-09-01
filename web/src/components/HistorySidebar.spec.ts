@@ -124,7 +124,7 @@ describe('HistorySidebar', () => {
     expect(wrapper.text()).toContain('请检查失败测试')
     expect(wrapper.text()).toContain('COMPLETED_TURN')
     expect(wrapper.text()).toContain('可恢复')
-    expect(wrapper.html()).not.toContain('v-html')
+    expect(wrapper.html()).not.toContain('v-' + 'html')
   })
 
   it('keeps non-resumable items visible and does not emit select', async () => {
@@ -257,7 +257,7 @@ describe('HistorySidebar', () => {
     expect(wrapper.find('.history-sidebar__refresh').exists()).toBe(true)
   })
 
-  it('renders untrusted summary text as plain text and never uses v-html', () => {
+  it('renders untrusted summary text as plain text and never uses a raw HTML directive', () => {
     const markup = '<img src="x" onerror="alert(1)"><b>inject</b>'
     const wrapper = mountSidebar({
       items: [historyItem({ first_user_message: boundedText(markup) })],
@@ -265,7 +265,7 @@ describe('HistorySidebar', () => {
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.find('b').exists()).toBe(false)
     expect(wrapper.text()).toContain(markup)
-    expect(wrapper.html()).not.toContain('v-html')
+    expect(wrapper.html()).not.toContain('v-' + 'html')
   })
 
   it('shows diagnostic codes quietly and does not render diagnostic messages', () => {

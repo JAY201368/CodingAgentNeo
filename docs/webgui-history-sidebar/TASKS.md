@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Execute（T01–T06 已验收；T07 待派发）
+> 状态：Complete（T01–T07 已验收）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -132,7 +132,7 @@ flowchart TD
 
 **完成摘要（2026-09-02）：** 窄屏（≤640px）侧边栏改为 overlay 抽屉，「历史」按钮开关，Escape/遮罩关闭；桌面侧边栏 in-flow。主 Agent 复跑 lint/type-check/`test`（123 passed）/build 通过。独立浏览器：1280 无汉堡、无横向溢出；360 无溢出，抽屉打开 sidebarLeft=0、Escape 关闭。未做真实 resume 端到端。
 
-### [ ] T07 — 完成端到端验收、运行文档与回归门
+### [x] T07 — 完成端到端验收、运行文档与回归门
 
 **依赖：** T06
 **范围：** 补齐历史侧边栏 + 恢复旅程的聚合/脚本化验收与运行说明，核对 secret/生成物/依赖边界与契约一致性，确认既有 Python 与前序工作流质量门不回归。只修复本工作流 T01–T06 引入的集成缺陷；不改 Python 契约、不实现新后端能力。真实模型/真实浏览器仅在用户提供未入库环境时执行并如实标注。
@@ -145,6 +145,8 @@ flowchart TD
 - Web 全量 lint/type-check/test/build 通过；既有 Python 全量测试、acceptance、baseline/web-frontend/backend-history-discover 回归与 workflow validator 通过或如实报告仅环境限制；架构、任务、进度、决策描述同一完成态。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test`；`npm --prefix web run build`；`.venv/bin/python -m pytest`；`.venv/bin/python -m pytest tests/acceptance -m acceptance`；`python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/webgui-history-sidebar`；secret/依赖/包内容扫描与人工运行说明复核。
+
+**完成摘要（2026-09-02）：** 对照表见 `acceptance.md`；README 写明侧边栏先 DELETE 再 resume，并删除过时的「no server-restart Web resume」。主 Agent 复跑 Web lint/type-check/`test`（124 passed）/build 通过；acceptance **59 passed**；workflow validator（webgui-history-sidebar/web-frontend/backend-history-discover/baseline）通过。全量 pytest **346 passed / 1 failed**：`test_main_corrupt_session_is_startup_failure` 因本机 ignored 配置含未知选项返回 EXIT_CONFIG(2)；`CODING_AGENT_NEO_CONFIG` 指向不存在文件后该用例通过。未跑真实模型/真实浏览器 resume。
 
 ## 推荐顺序
 

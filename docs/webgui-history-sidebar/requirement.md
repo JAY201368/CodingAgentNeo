@@ -1,7 +1,7 @@
 # CodingAgentNeo Web GUI 历史侧边栏需求
 
-> 状态：Bootstrap（尚未实现产品代码；等待架构与任务 DAG 审阅后再串行派发）
-> 日期：2026-09-01
+> 状态：已实现并验收（T01–T07）
+> 日期：2026-09-02
 > 依赖前序工作流：[../web-frontend/](../web-frontend/)（Web 前端 T01–T10 已交付）、[../backend-history-discover/](../backend-history-discover/)（后端与适配层历史/恢复能力 T01–T06 已交付）
 > Agent 适配层规范（前端唯一接入权威）：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -38,7 +38,7 @@
 - 不新增：任意工作区文件浏览器、原始 JSONL 下载、按消息文本搜索、历史删除/重命名/导出、并发/多活跃 session、跨 workspace 控制平面、运行中 steering、消息队列、子 Agent、MCP、Skill、远程/公网部署或认证。
 - 浏览器不接收 workspace 路径、session 目录、文件名或凭据；侧边栏只用后端返回的不透明 `session_id` 与有界摘要，恢复只回送不透明 `resume_session_id`。
 - 保持单 Agent、单活跃 turn、线性 session 与工具串行语义；resume 不 replay 历史工具副作用。
-- 本轮工作流初始化不实现产品代码；实现须在架构与任务 DAG 经审阅后按任务卡串行进行。
+- 产品代码已按 T01–T07 串行交付；本工作流只消费既有历史/恢复 wire 契约，不新增后端能力。
 
 ## 验收方向
 

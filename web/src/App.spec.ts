@@ -7,6 +7,22 @@ import App from './App.vue'
 
 const HISTORY_SESSION_ID = fixture.history.resume.request.resume_session_id
 const EMPTY_HISTORY_LIST = { sessions: [], next_cursor: null }
+const PAGE_TWO_SESSION = {
+  session_id: 'session_fixture_2',
+  first_user_message: {
+    text: 'page two',
+    truncated: false,
+    original_length: 8,
+    limit: 4096,
+    encoding: 'utf-8',
+  },
+  created_at: '2026-09-01T08:02:00.000000Z',
+  updated_at: '2026-09-01T08:03:00.000000Z',
+  last_sequence: 2,
+  last_state: 'COMPLETED_TURN',
+  resumable: true,
+  diagnostics: [],
+}
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -496,6 +512,13 @@ function makeHistoryAppClient(options: {
     const body = requestBody(init)
     calls.push({ method, path, body })
     if (isHistoryListPath(path)) {
+      const url = new URL(path, 'http://local.invalid')
+      if (url.searchParams.get('cursor') === 'opaque_history_cursor_fixture_1') {
+        return jsonResponse({
+          sessions: [PAGE_TWO_SESSION],
+          next_cursor: null,
+        })
+      }
       return jsonResponse(fixture.history.list)
     }
     if (path.endsWith('/sessions') && method === 'POST') {
@@ -556,6 +579,31 @@ describe('App history sidebar wiring', () => {
     expect(wrapper.get('.app-main .conversation-workspace')).toBeTruthy()
     expect(wrapper.get('.app-main .composer')).toBeTruthy()
     expect(wrapper.find('.app-shell #app-title').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('lists history and pages with the opaque next_cursor', async () => {
+    const scripted = makeHistoryAppClient()
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await nextTask()
+    await flushPromises()
+
+    const sidebar = wrapper.get('.history-sidebar')
+    expect(sidebar.text()).toContain('请检查失败测试')
+    expect(wrapper.find('.history-sidebar__load-more').exists()).toBe(true)
+
+    await wrapper.get('.history-sidebar__load-more').trigger('click')
+    await flushPromises()
+
+    const listCalls = scripted.calls.filter((call) =>
+      call.method === 'GET' && isHistoryListPath(call.path),
+    )
+    expect(listCalls[0]?.path).toBe('/api/v1/session-history')
+    expect(listCalls.some((call) =>
+      call.path.includes('cursor=opaque_history_cursor_fixture_1'),
+    )).toBe(true)
+    expect(sidebar.text()).toContain('page two')
+    expect(wrapper.find('.history-sidebar__load-more').exists()).toBe(false)
     wrapper.unmount()
   })
 

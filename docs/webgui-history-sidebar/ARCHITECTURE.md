@@ -1,8 +1,8 @@
 # CodingAgentNeo Web GUI 历史侧边栏架构
 
-> 状态：Bootstrap（规划中，未实现产品代码）
+> 状态：已实现并验收（T01–T07）
 > 架构版本：0.1
-> 日期：2026-09-01
+> 日期：2026-09-02
 > 需求入口：[requirement.md](requirement.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)（第 4 节 HTTP/SSE binding、4.2 history resources、4.5.1 resume、4.7 事件目录、第 6 节共享规则）
 > 复用的既有 Web 架构：[../web-frontend/ARCHITECTURE.md](../web-frontend/ARCHITECTURE.md)
@@ -169,6 +169,7 @@ flowchart LR
 | Web 组件（HistorySidebar/App） | 选择/加载更多/当前项/错误态、键盘与 aria、布局切换 | 不证明真实浏览器全集 |
 | 视觉/可访问性人工检查 | 桌面/360px、侧边栏折叠、焦点、对比度、reduced-motion | 不替代自动回归 |
 | 共享 wire fixture | Web 历史/事件解析与 Python HTTP 历史测试同源样例，防协议漂移 | 不证明真实网关 |
+| 聚合对照 | [acceptance.md](acceptance.md) 把 T07 旅程映射到既有 Vitest 用例；`tests/acceptance/test_webgui_history_sidebar_acceptance.py` 扫描静态边界 | 不证明真实浏览器/模型 |
 | 回归门 | Web lint/type/test/build 通过；既有 Python 全量/acceptance 与前序工作流验证不回归 | 未运行的真实 API/浏览器/平台明确保留 |
 
 模拟/离线证据不冒充真实模型网关、真实浏览器或公网部署。
