@@ -45,7 +45,32 @@ python -m pip install -e ".[dev,http]"
 coding-agent-neo-http --config .coding-agent-neo.toml
 ```
 
-The independent Web package currently provides a local, disconnected placeholder page. It does not need Python, an API key, or an Agent service:
+For Web development, run the Agent HTTP service above and start Vite in a
+second process. Vite forwards only `/api` to the loopback Agent service, so the
+browser uses the same `/api/v1` wire client as the production composition:
+
+```bash
+npm --prefix web run dev
+```
+
+For a same-origin local demonstration, build the Web assets and start the
+separate composition root:
+
+```bash
+npm --prefix web run build
+coding-agent-neo-web --config .coding-agent-neo.toml
+```
+
+The Web launcher listens on `127.0.0.1:8765`, serves `/api/v1` through the
+frontend-independent Agent HTTP adapter, and serves the built `web/dist` SPA.
+The Python wheel contains no Node dependencies or Web build output; use
+`--dist-dir PATH` when launching from an installed package with an external
+Vite build. The launcher does not build or inject configuration into static
+HTML, and a missing build is rejected before the service starts.
+
+The Web package can also be run independently for frontend development; the
+Vite server itself does not require an API key, although Agent interactions
+need the separate local HTTP service (or the composition launcher above):
 
 ```bash
 cd web

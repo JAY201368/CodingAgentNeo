@@ -30,6 +30,7 @@ http = [
 [project.scripts]
 coding-agent-neo = "coding_agent_neo.cli:main"
 coding-agent-neo-http = "coding_agent_neo.http_cli:main"
+coding-agent-neo-web = "coding_agent_neo.web_launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

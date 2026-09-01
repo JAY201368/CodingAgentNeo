@@ -81,3 +81,9 @@
 - 选择：浏览器在 SSE 连接失败或流提前结束时最多自动重连 5 次，退避从 250 ms 指数增长并封顶 5 s；跳号则保留最后成功 cursor、立即重新订阅且不把缺口事件写入 timeline。POST 命令不进入重试循环；重新 attach 得到 RUNNING 快照时即使流已打开也暂不允许新任务，直到消费 canonical turn_end 或 session_end，并明确提示可以 Stop 或结束 session。
 - 理由与替代：SSE 是可安全重复的事实读取，有限退避可覆盖短暂本地服务抖动并避免无限请求；命令 POST 连接失败不能证明未被接受，自动重放会产生重复 turn/副作用，因此只允许用户显式决定后重试。跳号必须从旧 cursor 补回而不能跳过缺失事实。
 - 后果：达到上限后浏览器进入失联/禁命令状态但保留不含任务正文的 transport ID/cursor，用户手动重新连接时仍先 GET 查询；未知或已关闭 session 清除标识并提示新建，组件卸载只停止事件消费，不作为 Agent 关闭证据。
+
+## 2026-09-01 — T09 将 Web 构建产物作为外置部署输入
+
+- 选择：`coding-agent-neo-web` 默认读取源码检出的 `web/dist`，也接受 `--dist-dir PATH`；Python wheel 只包含 Python 包和入口，不夹带 `node_modules`、coverage 或 Vite 生成物。
+- 理由与替代：Node 构建依赖和产物具有独立生命周期，且 `web/dist` 被忽略、不可在未构建时可靠地成为 Python 包数据；要求显式构建或传入目录能在启动前安全失败，同时保留离线/安装包使用外部构建物的能力。
+- 后果：发布 Web 演示前必须先执行 `npm --prefix web run build`，或向 launcher 传入已构建的 `--dist-dir`；通用 `transports/http/` 和独立 `coding-agent-neo-http` 仍不定位任何静态资源。

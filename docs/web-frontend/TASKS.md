@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：T01～T08 已验收；T09～T10 待串行实施
+> 状态：T01～T09 已验收；T10 待串行实施
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -177,7 +177,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** 已在既有用户旅程上交付浅色紫金 token、响应式布局、空/加载/错误状态、文字与图标并用的状态反馈、可见键盘焦点、授权 dialog 焦点约束与恢复、`aria-live`/`aria-busy` 以及 `prefers-reduced-motion` 路径；未增加业务、重型组件库、校徽或部署耦合。主 Agent 复核：Web lint、type-check、build 与 46 项测试均通过；Codex In-app Browser 在 1280×720 和 360×800 下均无横向溢出，状态/错误语义和移动端操作可见可用，授权完整键盘路径及对比度证据记录于 `T08_VISUAL_CHECK.md`。浏览器运行时未提供强制切换系统 reduced-motion 偏好的能力，因此仅核验 CSSOM 规则且未伪造截图；未执行真实模型、公网部署或 T09 组合入口。
 
-### [ ] T09 — 交付与通用 Agent HTTP 分离的 Web 组合入口
+### [x] T09 — 交付与通用 Agent HTTP 分离的 Web 组合入口
 
 **依赖:** T02, T08
 **范围:** 新增独立 `web_launcher.py`/`coding-agent-neo-web` composition root，把已构建 `web/dist` 与通用 Agent HTTP ASGI app 同源组合以便本地一键演示；通用 `transports/http/` 保持完全不知道 Vue/Vite/静态路径。排除修改 wire/core、自动构建 Node 项目和公网部署。
@@ -191,6 +191,8 @@ flowchart TD
 - Python 包构建不夹带 `node_modules`/coverage；静态资源是否进入 wheel 由任务内按已写契约实现并验证，不临时发明远程 CDN。
 
 **验证:** `npm --prefix web run build`; `.venv/bin/python -m pytest tests/transports tests/web_launcher`; `.venv/bin/coding-agent-neo-http --help`; `.venv/bin/coding-agent-neo-web --help`; `.venv/bin/python -m pytest`; `.venv/bin/python -m build`; 静态依赖与包内容检查。
+
+**完成摘要（2026-09-01）:** 已交付独立 `web_launcher.py`/`coding-agent-neo-web` composition root，在任何 Agent/config/listener 副作用前校验外置 Vite dist；`/api/v1` 始终优先交给通用 HTTP ASGI app，extensionless Web 路径提供 SPA fallback，缺失静态资源保持 404，静态请求同样执行 Host/Origin 回环安全校验。通用 `coding-agent-neo-http` 与 `transports/http/` 未接触 Vue/Vite/静态路径，Vite dev proxy 与生产共用既有 `/api/v1` wire client；wheel 明确不夹带 `web/dist`、`node_modules` 或 coverage，安装态可用 `--dist-dir`。主 Agent 复核：launcher + transports 20 passed、全量 pytest 286 passed、Web 46 passed及 lint/type-check/build、Ruff、workflow validator、diff check 均通过；本机已有 `uv` 缓存离线构建 sdist/wheel并安装验证 console entry，真实 uvicorn 探针确认 API、SPA 与 `127.0.0.1` 监听。仅有 Starlette 第三方弃用警告；未执行真实模型或公网部署。
 
 ### [ ] T10 — 完成端到端验收、运行文档与回归门
 
