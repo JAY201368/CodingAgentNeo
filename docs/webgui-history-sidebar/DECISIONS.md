@@ -61,3 +61,9 @@
 - 选择：`useSessionHistory` 的 `error` 为 `{code, message}`，message 只取 T01 `AgentApiError`/`AgentNetworkError` 的客户端短句；`loading` 仅在首次加载与 `refresh()` 期间为 true，`loadMore` 用内部 in-flight 闸门防重入。刷新/追加失败时保留上一页成功 `items` 并单独标 error。默认 `autoLoad` 在 composable 创建时立即请求（与 `useAgentSession` 一致），请求只带 `AbortSignal`，不传默认 `limit`/`cursor`。
 - 理由与替代：架构允许「保留上一页并单独标 error」，这样错误与「纯空成功」可区分，也不会在翻页失败时把已渲染列表清空。把 `loading` 限于替换型加载，避免 T04 把「加载更多」误显示成整表 spinner。替代方案是失败即清空 items，或把 loadMore 也算进 `loading`，都会让三态或分页控件更难用。
 - 后果：T04 应以 `error !== null` 作为错误态，不要用 `items.length===0` 兼做错误；「加载更多」进行中 `loading` 仍为 false，重复点击由 composable no-op。列表不持久化、不与 live session 命令互斥。
+
+## 2026-09-01 — T04：侧边栏只插值摘要，不可恢复项不 emit select
+
+- 选择：`HistorySidebar` 用 `safeDisplayText` + `{{ }}` 渲染 `first_user_message.text`，不把 `BoundedText` 放进选择按钮；`resumable===false` 的项保持可见并带「不可恢复」文字标记，点击不 emit `select`。错误态以 `error !== null` 为准，即使 `items` 非空也显示安全提示与「重试」。
+- 理由与替代：`BoundedText` 自带展开按钮，放进选择 `<button>` 会嵌套交互控件。不可恢复仍展示可避免用户以为列表丢了条目，但不 emit 可避免 T05 对不可恢复 ID 发起 resume。替代方案是复用 `BoundedText` 或对不可恢复项仍 emit 由父级拒绝，前者破坏语义，后者把防护推到接线层。
+- 后果：长摘要不在侧边栏内展开（T06 可用 CSS 截断）；T05 接线仍应只对 resumable 选择调用 `resumeSession`。诊断只展示 `code`，不渲染 `message`（避免路径泄漏）。最终 Codex 视觉与窄屏抽屉仍属 T06。

@@ -5,8 +5,18 @@
 - T01 — 历史列表/事件/恢复 wire client 与防御性 DTO：`GET /api/v1/session-history`、`GET /api/v1/session-history/{id}/events`、`POST /api/v1/sessions`（缺省 `{}` 或仅含 `resume_session_id`）按 transport 4.2/4.5.1 消费；非法 ID/cursor/limit 在发请求前失败；稳定码不透传后端正文；共享 `transport-v1.json` 样例。2026-09-01 主 Agent 复跑 Web lint/type-check/test(42 passed)/build/`git diff --check` 通过。
 - T02 — resume 旅程与历史 hydration：`resumeSession` 按终结→RESET→创建→hydration→SSE 执行；绑定新 transport 时 hydration 从 cursor 0 起步；创建失败 fail-closed；localStorage 只写新 transport ID/cursor。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/composables`（30 passed）/build 通过。
 - T03 — 历史列表状态与分页 composable：`useSessionHistory` 首次无 cursor 加载、原样回送 `next_cursor` 翻页、refresh 清错误、loading/空/错误三态互斥；失败保留上一页。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/composables`（42 passed）/build 通过。
+- T04 — 展示型历史侧边栏：按序渲染有界摘要，不可恢复项可见但不 emit select，switching 禁用选择，error !== null 即错误态。无 v-html。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/components`（20 passed）/build 通过。未改 App.vue。
 
 ## Current State
+
+- T04 已验收。可观察行为：
+  - `HistorySidebar` 为展示型组件：props 为 `items`/`loading`/`error`/`hasMore`/`activeSessionId`/`switching`；emits `select(session_id)`、`loadMore`、`refresh`。不 import wire client / `useSessionHistory` / `useAgentSession`，不 fetch、不发命令、不写 localStorage。
+  - 按传入顺序渲染 `first_user_message.text`（`safeDisplayText` + 插值，无 `v-html`）、`updated_at` 或 `created_at`、`last_state`、`resumable`；不可恢复项可见并标「不可恢复」，点击不 emit `select`。诊断只展示 `code`。
+  - `activeSessionId` 匹配项带 `aria-current="true"`；`switching=true` 时选择与「加载更多」disabled 且不 emit。
+  - 三态：`loading && items.length===0` 为加载中；`error !== null` 显示 `error.message` + 「重试」（即使 items 非空也保留列表）；`!loading && error===null && items.length===0` 为空态；有 items 始终渲染列表。
+  - 列表为 `ul[role=list]` / `li[role=listitem]`，可点项与加载更多/重试均为 `<button>`；`aria-busy` 跟随 `loading`；状态区 `aria-live="polite"`。
+  - 未改 `App.vue`。Worker 验证（2026-09-01）：`npm --prefix web run lint` 通过；`type-check` 通过；`test -- src/components` 20 passed（既有 ApprovalDialog 5 + HistorySidebar 15）；`build` 通过。
+
 
 - 2026-09-01 已完成工作流初始化：`requirement.md`、`ARCHITECTURE.md`、`TASKS.md`、`AGENTS.md`、`PROMPT_TEMPLATE.md`、`PROGRESS.md`、`DECISIONS.md` 就位，`validate_workflow.py` 结构校验通过。
 - 依赖前序工作流均已交付：Web 前端 `../web-frontend/`（T01–T10）与后端/适配层历史/恢复能力 `../backend-history-discover/`（T01–T06）。
@@ -17,7 +27,7 @@
   - 绑定新 transport 时 **不用** resume 响应 cursor 作为 hydration 起点；历史事件从 `since=0` 注入，由 reducer 推进 cursor；live SSE 使用 hydration 后的 reducer cursor（`sequence > cursor`）。
   - 先终结后创建失败（404/422/409 稳定码或创建阶段网络失败）进入 `SESSION_UNAVAILABLE`：无活跃 transport、不自动新建、不重放 POST；错误用 T01 客户端安全短句。DELETE 网络失败则停止、不 POST resume。
   - localStorage 只写新 transport ID/cursor，不写 historySessionId。恢复后 `finalAssistantText` / `projectTimeline` 可重现历史消息，`COMPLETED_TURN` 后可 `submitTask` follow-up。
-  - 未实现 `HistorySidebar`、App 布局或视觉。
+  - 未实现 App 布局或视觉（T05/T06）。`HistorySidebar` 已由 T04 交付。
   - Worker 验证：`npm --prefix web run lint`、`type-check`、`test -- src/composables`（30 passed）、`build` 均通过。
 - T03 已验收。可观察行为：
   - `useSessionHistory({ client?, autoLoad? })` 管理历史列表：`items`、`loading`、`error`、`hasMore`、`refresh()`、`loadMore()`。默认 `autoLoad=true` 在 composable 创建时调用 `listSessionHistory({ signal })`，不传 cursor、不传默认 limit。
@@ -38,4 +48,4 @@
 
 ## Next Recommended Task
 
-- T04 — 交付可 resume session 侧边栏组件。依赖 T03；新增 `HistorySidebar.vue` 展示型组件，排除 App 布局改造、resume 接线与最终视觉细节。
+- T05 — 交付 sidebar + 右侧居中布局与恢复旅程接线。依赖 T02 与 T04；改造 `App.vue` 挂载 `HistorySidebar` 并把 `select` 接到 `resumeSession`。排除最终视觉打磨与响应式细化（留 T06）。

@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Execute（T01–T03 已验收；其余任务串行派发中）
+> 状态：Execute（T01–T04 已验收；其余任务串行派发中）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -81,7 +81,7 @@ flowchart TD
 
 ## 阶段 C：侧边栏视图与布局整合
 
-### [ ] T04 — 交付可 resume session 侧边栏组件
+### [x] T04 — 交付可 resume session 侧边栏组件
 
 **依赖：** T03
 **范围：** 新增 `web/src/components/HistorySidebar.vue` 展示型组件：接收 `items`、`loading`、`error`、`hasMore`、`activeSessionId`、`switching` props，渲染历史 session 列表（首条用户消息摘要、时间、状态、是否可恢复），emit `select`/`loadMore`/`refresh`；提供当前项指示、加载中/空/错误态与「加载更多」控件。组件只渲染与 emit，不直接 fetch、不发命令、不做 resume 副作用。排除 App 布局改造、resume 接线与最终视觉细节。
@@ -94,6 +94,8 @@ flowchart TD
 - 组件级测试覆盖渲染、选择 emit、当前项高亮、加载更多、空/错误态、键盘可达与基本 aria（列表语义、按钮名称）。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/components`；`npm --prefix web run build`。
+
+**完成摘要（2026-09-01）：** 已交付展示型 `HistorySidebar`：按序渲染有界摘要，不可恢复项可见但不 emit select，switching 禁用选择，error !== null 即错误态并提供 refresh。无 v-html。主 Agent 复跑 lint/type-check/`test -- src/components`（20 passed）/build 通过。未改 App.vue。
 
 ### [ ] T05 — 交付 sidebar + 右侧居中布局与恢复旅程接线
 
