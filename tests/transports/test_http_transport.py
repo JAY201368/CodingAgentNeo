@@ -380,7 +380,6 @@ def test_close_command_is_delivered_once_and_closes_asynchronously() -> None:
 def test_http_path_injects_shared_backend_service_without_in_process_adapter(tmp_path) -> None:
     config = AppConfig(
         workspace=tmp_path,
-        session_dir=tmp_path / "sessions",
         api_key="placeholder",
         context_window=8000,
         reserved_output_tokens=1000,
@@ -410,5 +409,6 @@ def test_http_path_injects_shared_backend_service_without_in_process_adapter(tmp
         assert response.status_code == 202
         events = wait_session(tmp_path, lambda event: event.type == "turn_end")
         assert events[-1].payload["assistant_text"] == "service response"
+        assert list((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
         assert client.delete(f"/api/v1/sessions/{transport_id}").status_code == 204
     assert factory_calls == [True]

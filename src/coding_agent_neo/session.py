@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -138,25 +139,45 @@ def _envelope_from_record(record: Mapping[str, Any]) -> EventEnvelope:
     )
 
 
-def resolve_resume_path(
-    resume: str | os.PathLike[str],
-    session_dir: str | os.PathLike[str],
-) -> Path:
-    """Resolve ``--resume`` to a session JSONL path.
+_SESSION_ID_PATTERN = re.compile(r"^session_[A-Za-z0-9_-]{1,120}$")
 
-    A value with a directory component, an absolute path, or a ``.jsonl``
-    suffix is treated as an explicit file path.  Otherwise it is a session ID
-    and maps to ``{session_dir}/{id}.jsonl``.
+
+def resolve_session_path(
+    session_id: str,
+    workspace: str | os.PathLike[str],
+) -> Path:
+    """Resolve one opaque session ID below the fixed workspace repository.
+
+    The ID is validated before any path is constructed.  ``workspace`` is a
+    composition-owned path; callers must never pass a frontend-selected
+    session directory or JSONL filename here.
     """
 
-    token = os.fspath(resume)
-    if not isinstance(token, str) or not token.strip() or "\x00" in token:
-        raise ValueError("resume target must be a non-empty path or session ID")
-    token = token.strip()
-    candidate = Path(token).expanduser()
-    if candidate.is_absolute() or len(candidate.parts) > 1 or candidate.suffix == ".jsonl":
-        return candidate
-    return Path(session_dir) / f"{token}.jsonl"
+    if not isinstance(session_id, str) or not _SESSION_ID_PATTERN.fullmatch(session_id):
+        raise ValueError("session ID is invalid")
+    try:
+        workspace_path = Path(workspace).expanduser().resolve(strict=False)
+        session_root = workspace_path / ".coding-agent-neo"
+        sessions_path = session_root / "sessions"
+        session_path = sessions_path / f"{session_id}.jsonl"
+
+        # The fixed components are composition-owned.  Refuse an existing
+        # symlink before a SessionStore can create or open the record, even
+        # when the link happens to resolve back inside the workspace.
+        for component in (session_root, sessions_path, session_path):
+            if component.is_symlink():
+                raise ValueError("session path contains a symlink")
+
+        # Also verify the canonical destination so a non-final symlink or a
+        # link introduced in a missing component cannot redirect persistence
+        # outside the resolved workspace.  No component is replaced here.
+        resolved_session_path = session_path.resolve(strict=False)
+        resolved_session_path.relative_to(workspace_path)
+    except ValueError:
+        raise
+    except (OSError, RuntimeError) as error:
+        raise ValueError("session path could not be validated") from error
+    return session_path
 
 
 def discard_incomplete_tail(path: str | os.PathLike[str]) -> SessionDiagnostic | None:
@@ -511,5 +532,5 @@ __all__ = [
     "SessionWriteError",
     "discard_incomplete_tail",
     "read_session",
-    "resolve_resume_path",
+    "resolve_session_path",
 ]

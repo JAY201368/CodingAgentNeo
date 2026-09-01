@@ -38,6 +38,34 @@ def test_key_is_looked_up_by_name_and_errors_are_redacted(tmp_path: Path) -> Non
     assert secret not in str(exc_info.value)
 
 
+def test_session_directory_is_not_a_configurable_field(tmp_path: Path) -> None:
+    config_path = tmp_path / "legacy.toml"
+    config_path.write_text('session_dir = "custom-sessions"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="unknown"):
+        load_config(
+            {"workspace": tmp_path},
+            environ={"OPENAI_API_KEY": "placeholder"},
+            config_path=config_path,
+        )
+
+    with pytest.raises(ConfigError, match="unknown"):
+        load_config(
+            {"workspace": tmp_path},
+            environ={
+                "OPENAI_API_KEY": "placeholder",
+                "CODING_AGENT_NEO_SESSION_DIR": "custom-sessions",
+            },
+            config_path=tmp_path / "missing.toml",
+        )
+
+    with pytest.raises(ConfigError, match="unknown"):
+        load_config(
+            {"workspace": tmp_path, "session_dir": tmp_path / "custom-sessions"},
+            environ={"OPENAI_API_KEY": "placeholder"},
+            config_path=tmp_path / "missing.toml",
+        )
+
+
 @pytest.mark.parametrize(
     ("values", "message"),
     [

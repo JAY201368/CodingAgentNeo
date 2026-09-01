@@ -16,15 +16,15 @@ Tests may inject a fake ``model_client`` / ``environment`` and smaller
 timeouts. Production callers omit those and receive Local Environment plus
 the OpenAI-compatible client.
 
-Linear session resume is also owned here: ``resume`` selects a JSONL file,
-rebuilds root Runtime state, and opens the same Store for sequence
-continuation. Historical tool side effects are never replayed.
+Linear session resume is also owned here: ``resume`` selects an opaque session
+ID below the fixed workspace repository, rebuilds root Runtime state, and
+opens the same Store for sequence continuation. Historical tool side effects
+are never replayed.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,7 +65,7 @@ from coding_agent_neo.session import (
     SessionStore,
     discard_incomplete_tail,
     read_session,
-    resolve_resume_path,
+    resolve_session_path,
 )
 from coding_agent_neo.tools.registry import default_tool_registry
 from coding_agent_neo.transports.in_process import InProcessAdapter
@@ -252,14 +252,14 @@ def _complete_message_groups(
     return tuple(groups)
 
 
-def _locate_resume_file(config: AppConfig, resume: str | os.PathLike[str]) -> Path:
+def _locate_resume_file(config: AppConfig, resume: str) -> Path:
     try:
-        path = resolve_resume_path(resume, config.session_dir)
-    except ValueError as error:
+        path = resolve_session_path(resume, config.workspace)
+    except (TypeError, ValueError) as error:
         raise ConfigError("resume target is invalid") from error
     try:
         exists = path.exists()
-        is_file = path.is_file() if exists else False
+        is_file = path.is_file() if exists and not path.is_symlink() else False
     except OSError as error:
         raise ConfigError("session file could not be read") from error
     if not exists:
@@ -471,7 +471,7 @@ def build_agent_backend(
     config: AppConfig,
     *,
     interactive: bool,
-    resume: str | os.PathLike[str] | None = None,
+    resume: str | None = None,
     model_client: Any | None = None,
     environment: Any | None = None,
     approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
@@ -501,7 +501,10 @@ def build_agent_backend(
     else:
         session_id = SessionId(f"session_{uuid4().hex}")
         agent_id = AgentId(f"agent_{uuid4().hex}")
-        path = config.session_dir / f"{session_id}.jsonl"
+        try:
+            path = resolve_session_path(str(session_id), config.workspace)
+        except (TypeError, ValueError) as error:
+            raise ConfigError("session storage path is invalid") from error
 
     registry = default_tool_registry()
     if resume_plan is not None and resume_plan.active_tools:
@@ -608,7 +611,7 @@ def build_in_process_adapter(
     config: AppConfig,
     *,
     interactive: bool,
-    resume: str | os.PathLike[str] | None = None,
+    resume: str | None = None,
     model_client: Any | None = None,
     environment: Any | None = None,
     approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
@@ -642,7 +645,7 @@ def build_local_backend(
     config: AppConfig,
     *,
     interactive: bool,
-    resume: str | os.PathLike[str] | None = None,
+    resume: str | None = None,
     model_client: Any | None = None,
     environment: Any | None = None,
     approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,

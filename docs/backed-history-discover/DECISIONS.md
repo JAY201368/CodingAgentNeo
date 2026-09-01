@@ -25,3 +25,9 @@ Add only durable, non-obvious decisions with downstream consequences.
 - Choice: both adapters receive one workspace-scoped `AgentBackendProvider`; history list/read returns immutable v1 DTO pages with newest-first list ordering, sequence-based event pagination, 4,096-byte first-message projection, and bounded diagnostics. Event history is finite JSON; only live events use iterators/SSE.
 - Rationale and rejected alternative: a provider keeps persistence and resume authorization behind one backend dependency, while explicit bounds and opaque list cursors prevent unbounded responses or path-derived frontend inputs.
 - Consequences: T02–T05 must implement the fixed `workspace/.coding-agent-neo/sessions` location, `session_...` ID validation, `1..100` list and `1..200` event limits, stable history/resume errors, and the HTTP `resume_session_id` request without restoring `session_dir`/`--session-dir`. T01 changes no product implementation or Web fixture.
+
+## 2026-09-01 — T02 derives persistence and resume targets from resolved workspace
+
+- Choice: `AppConfig` carries only the resolved workspace; assembly derives every production session file as `<workspace>/.coding-agent-neo/sessions/<session_id>.jsonl`, and resume accepts only a strict opaque `session_...` ID.
+- Rationale and rejected alternative: retaining a path-or-ID resolver would preserve a caller-controlled persistence boundary and allow records from unrelated workspaces to be resumed.
+- Consequences: legacy TOML, `CODING_AGENT_NEO_SESSION_DIR`, and CLI `--session-dir` inputs are rejected as unknown configuration; resume hints contain only the ID; direct path-based recovery remains available solely through the internal `recover_session_plan(path)` test seam for malformed-record coverage. Existing custom directories are neither discovered nor migrated.

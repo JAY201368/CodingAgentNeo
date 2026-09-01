@@ -7,7 +7,6 @@ composition-owned factory without importing the concrete service graph.
 
 from __future__ import annotations
 
-import os
 from typing import Any, Protocol
 
 from coding_agent_neo.backend import (
@@ -26,7 +25,7 @@ class AgentBackendFactory(Protocol):
         config: Any,
         *,
         interactive: bool,
-        resume: str | os.PathLike[str] | None = None,
+        resume: str | None = None,
         model_client: Any | None = None,
         environment: Any | None = None,
         approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,

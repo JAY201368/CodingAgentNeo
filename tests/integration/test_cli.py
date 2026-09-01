@@ -64,7 +64,6 @@ class ScriptedModel:
 def config(tmp_path: Path, **changes) -> AppConfig:
     values = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "context_window": 8000,
         "reserved_output_tokens": 1000,
@@ -103,13 +102,13 @@ def test_noninteractive_success_stdout_contract_and_parseable_session(tmp_path: 
     assert code == 0
     assert stdout.getvalue() == "done\n"
     assert "assistant> done" in stderr.getvalue()
-    paths = list((tmp_path / "sessions").glob("*.jsonl"))
+    paths = list((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
     assert len(paths) == 1
     session_id = paths[0].stem
     hint = stderr.getvalue()
     assert "To continue this session, run:" in hint
     assert f"--resume {session_id}" in hint
-    assert "--session-dir" in hint
+    assert "--session-dir" not in hint
     events = read_session(paths[0]).events
     assert events[-1].type == EventType.SESSION_END
 
@@ -133,7 +132,7 @@ def test_interactive_initial_and_followup(tmp_path: Path) -> None:
     assert "follow-up> " in output.getvalue()
     assert "assistant> first" in output.getvalue()
     assert "assistant> second" in output.getvalue()
-    session_id = next((tmp_path / "sessions").glob("*.jsonl")).stem
+    session_id = next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl")).stem
     assert "To continue this session, run:" in output.getvalue()
     assert f"--resume {session_id}" in output.getvalue()
 
@@ -169,19 +168,9 @@ def test_exit_code_interrupted_contract() -> None:
     assert exit_code_for(Result()) == EXIT_INTERRUPTED
 
 
-def test_format_resume_hint_omits_default_session_dir() -> None:
+def test_format_resume_hint_uses_only_opaque_session_id() -> None:
     hint = format_resume_hint("session_abc")
     assert hint == "To continue this session, run: coding-agent-neo --resume session_abc"
-    default = format_resume_hint("session_abc", session_dir=Path(".coding-agent-neo/sessions"))
-    assert default == hint
-
-
-def test_format_resume_hint_includes_custom_session_dir(tmp_path: Path) -> None:
-    session_dir = tmp_path / "custom sessions"
-    hint = format_resume_hint("session_abc", session_dir=session_dir)
-    assert hint.startswith("To continue this session, run: coding-agent-neo --resume session_abc")
-    assert "--session-dir" in hint
-    assert "custom sessions" in hint
 
 
 def test_interactive_empty_input_does_not_print_resume_hint(tmp_path: Path) -> None:
@@ -277,7 +266,7 @@ def test_keyboard_interrupt_is_documented_and_persisted(tmp_path: Path) -> None:
         backend_factory=factory_for(ScriptedModel([KeyboardInterrupt()])),
     )
     assert code == EXIT_INTERRUPTED
-    path = next((tmp_path / "sessions").glob("*.jsonl"))
+    path = next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
     assert read_session(path).events[-1].payload["state"] == RuntimeState.INTERRUPTED
     assert "To continue this session, run:" in stderr.getvalue()
     assert f"--resume {path.stem}" in stderr.getvalue()
@@ -294,9 +283,36 @@ def test_subprocess_help_and_redacted_config_failure(tmp_path: Path) -> None:
     )
     assert help_result.returncode == 0
     assert "Exit codes" in help_result.stdout
-    secret = "subprocess-secret-sentinel"
+    assert "--session-dir" not in help_result.stdout
     environment = os.environ.copy()
     environment.pop("MISSING_TEST_KEY", None)
+    failure = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "coding_agent_neo",
+            "--task",
+            "noop",
+            "--workspace",
+            str(tmp_path),
+            "--api-key-env",
+            "MISSING_TEST_KEY",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert failure.returncode == 2
+    assert failure.stdout == ""
+    assert "configuration error" in failure.stderr
+
+
+def test_subprocess_legacy_session_dir_is_rejected_safely(tmp_path: Path) -> None:
+    environment = os.environ.copy()
+    environment["OPENAI_API_KEY"] = "placeholder"
+    secret = "subprocess-secret-sentinel"
     failure = subprocess.run(
         [
             sys.executable,
@@ -309,7 +325,7 @@ def test_subprocess_help_and_redacted_config_failure(tmp_path: Path) -> None:
             "--session-dir",
             str(tmp_path / secret),
             "--api-key-env",
-            "MISSING_TEST_KEY",
+            "OPENAI_API_KEY",
         ],
         cwd=tmp_path,
         env=environment,

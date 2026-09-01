@@ -3,10 +3,11 @@
 ## Completed
 
 - T01 — Backend and transport specifications now define one workspace-scoped provider, bounded history summaries/event pages, fixed-path opaque-ID resume, equivalent In-process/HTTP bindings, and stable safe errors; structural and existing architecture/transport tests passed.
+- T02 — Production configuration and launchers no longer expose a session directory; new/resumed JSONL is confined to the fixed workspace repository with opaque-ID and symlink/containment checks.
 
 ## Current State
 
-- T01 is accepted. The authoritative contracts are stable; product behavior remains at the baseline until T02 begins the fixed-path configuration change.
+- T01 and T02 are accepted. Fixed-path persistence is implemented; the workspace-scoped history provider and DTO behavior remain unimplemented until T03.
 
 ## Known Issues
 
@@ -16,4 +17,4 @@
 
 ## Next Recommended Task
 
-- T02 — Remove production `session_dir`/`--session-dir` and derive all session persistence from the resolved workspace; T01 is checked and evidenced.
+- T03 — Implement backend-owned history discovery, bounded event pages, first-message summaries, and provider-controlled new/resumed backend creation; T01 and T02 are checked and evidenced.

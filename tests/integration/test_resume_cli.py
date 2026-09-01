@@ -64,7 +64,6 @@ class RecordingLocalEnvironment(LocalExecutionEnvironment):
 def config(tmp_path: Path, **changes) -> AppConfig:
     values = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "approval_mode": "auto",
         "context_window": 8000,
@@ -94,7 +93,7 @@ def factory_for(model, environment=None):
 def wait_turn(tmp_path: Path, *, timeout: float = 3.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() <= deadline:
-        paths = list((tmp_path / "sessions").glob("*.jsonl"))
+        paths = list((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
         if paths:
             events = read_session(paths[0]).events
             if any(event.type == EventType.TURN_END for event in events):
@@ -152,7 +151,7 @@ def test_cli_resume_followup_continues_sequence_and_stdio_contract(tmp_path: Pat
         backend_factory=factory_for(
             ScriptedModel([NormalizedAssistantResponse(text="follow-answer")])
         ),
-        resume=str(path),
+        resume=path.stem,
     )
 
     assert code == EXIT_SUCCESS
@@ -211,7 +210,7 @@ def test_cli_resume_does_not_replay_historical_side_effects(tmp_path: Path) -> N
     resumed = RecordingLocalEnvironment(workspace)
     stdout, stderr = StringIO(), StringIO()
     code = run_cli(
-        config(tmp_path, workspace=workspace),
+        config(tmp_path),
         task="status",
         interactive=False,
         input_stream=StringIO(),
@@ -221,7 +220,7 @@ def test_cli_resume_does_not_replay_historical_side_effects(tmp_path: Path) -> N
             ScriptedModel([NormalizedAssistantResponse(text="still here")]),
             environment=resumed,
         ),
-        resume=str(path),
+        resume=path.stem,
     )
     assert code == EXIT_SUCCESS
     assert stdout.getvalue() == "still here\n"
@@ -247,7 +246,7 @@ def test_cli_resume_reports_incomplete_tail_on_stderr(tmp_path: Path) -> None:
         output_stream=stdout,
         error_stream=stderr,
         backend_factory=factory_for(ScriptedModel([NormalizedAssistantResponse(text="after")])),
-        resume=str(path),
+        resume=path.stem,
     )
     assert code == EXIT_SUCCESS
     assert stdout.getvalue() == "after\n"
@@ -270,7 +269,7 @@ def test_cli_interactive_resume_prompts_followup(tmp_path: Path) -> None:
         output_stream=output,
         error_stream=StringIO(),
         backend_factory=factory_for(ScriptedModel([NormalizedAssistantResponse(text="next")])),
-        resume=str(path),
+        resume=path.stem,
     )
     assert code == EXIT_SUCCESS
     text = output.getvalue()
@@ -286,13 +285,30 @@ def test_main_missing_session_is_configuration_error(tmp_path: Path, monkeypatch
     code = main(
         [
             "--resume",
-            "missing_session",
+            "session_missing",
             "--task",
             "follow",
             "--workspace",
             str(tmp_path),
-            "--session-dir",
-            str(tmp_path / "sessions"),
+            "--api-key-env",
+            "OPENAI_API_KEY",
+        ]
+    )
+    assert code == EXIT_CONFIG
+
+
+def test_main_rejects_explicit_jsonl_resume_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "placeholder")
+    explicit = tmp_path / "outside.jsonl"
+    explicit.write_text("", encoding="utf-8")
+    code = main(
+        [
+            "--resume",
+            str(explicit),
+            "--task",
+            "follow",
+            "--workspace",
+            str(tmp_path),
             "--api-key-env",
             "OPENAI_API_KEY",
         ]
@@ -302,19 +318,17 @@ def test_main_missing_session_is_configuration_error(tmp_path: Path, monkeypatch
 
 def test_main_corrupt_session_is_startup_failure(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "placeholder")
-    path = tmp_path / "sessions" / "session_bad.jsonl"
+    path = tmp_path / ".coding-agent-neo" / "sessions" / "session_bad.jsonl"
     path.parent.mkdir(parents=True)
     path.write_text('{"schema_version":1}\n', encoding="utf-8")
     code = main(
         [
             "--resume",
-            str(path),
+            path.stem,
             "--task",
             "follow",
             "--workspace",
             str(tmp_path),
-            "--session-dir",
-            str(tmp_path / "sessions"),
             "--api-key-env",
             "OPENAI_API_KEY",
         ]
@@ -331,13 +345,11 @@ def test_subprocess_resume_missing_file_exit_code(tmp_path: Path) -> None:
             "-m",
             "coding_agent_neo",
             "--resume",
-            "missing_session",
+            "session_missing",
             "--task",
             "follow",
             "--workspace",
             str(tmp_path),
-            "--session-dir",
-            str(tmp_path / "sessions"),
             "--api-key-env",
             "OPENAI_API_KEY",
         ],

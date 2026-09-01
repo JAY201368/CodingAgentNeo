@@ -46,7 +46,6 @@ pytestmark = pytest.mark.acceptance
 def _config(tmp_path: Path, **changes: Any) -> AppConfig:
     values: dict[str, Any] = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "context_window": 8_000,
         "reserved_output_tokens": 1_000,

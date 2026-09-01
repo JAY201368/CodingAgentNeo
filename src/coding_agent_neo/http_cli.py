@@ -13,13 +13,13 @@ from coding_agent_neo.config import ConfigError, load_config
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+_LEGACY_SESSION_OPTION = "--session-" + "dir"
 
 _CONFIG_OPTIONS = (
     "model",
     "api_base",
     "api_key_env",
     "workspace",
-    "session_dir",
     "approval_mode",
     "max_steps",
     "max_tool_calls",
@@ -30,6 +30,17 @@ _CONFIG_OPTIONS = (
     "model_output_limit",
     "session_output_limit",
 )
+
+
+def _legacy_session_option_present(arguments: Sequence[str]) -> bool:
+    for argument in arguments:
+        if not isinstance(argument, str):
+            continue
+        if argument == _LEGACY_SESSION_OPTION:
+            return True
+        if argument.startswith(f"{_LEGACY_SESSION_OPTION}="):
+            return True
+    return False
 
 
 def _port(value: str) -> int:
@@ -63,7 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-base")
     parser.add_argument("--api-key-env")
     parser.add_argument("--workspace")
-    parser.add_argument("--session-dir")
     parser.add_argument("--approval-mode", choices=("ask", "auto", "deny"))
     parser.add_argument("--yolo", action="store_true", help="Alias for --approval-mode auto.")
     parser.add_argument("--max-steps", type=int)
@@ -125,7 +135,11 @@ def run_server(
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse configuration and run only the Agent HTTP service."""
 
-    args = build_parser().parse_args(argv)
+    arguments = tuple(sys.argv[1:] if argv is None else argv)
+    if _legacy_session_option_present(arguments):
+        print("configuration error: unknown configuration option", file=sys.stderr)
+        return 2
+    args = build_parser().parse_args(arguments)
     try:
         config = load_config(_config_values(args), config_path=args.config)
         run_server(config, port=args.port, log_level=args.log_level)

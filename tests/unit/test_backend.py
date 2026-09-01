@@ -50,7 +50,6 @@ class ScriptedModel:
 def config(tmp_path: Path, **changes) -> AppConfig:
     values = {
         "workspace": tmp_path,
-        "session_dir": tmp_path / "sessions",
         "api_key": "placeholder",
         "context_window": 8000,
         "reserved_output_tokens": 1000,
@@ -94,7 +93,7 @@ def bash_call(command: str) -> NormalizedAssistantResponse:
 
 
 def session_events(tmp_path: Path):
-    path = next((tmp_path / "sessions").glob("*.jsonl"))
+    path = next((tmp_path / ".coding-agent-neo" / "sessions").glob("*.jsonl"))
     return read_session(path).events
 
 

@@ -23,6 +23,7 @@ from coding_agent_neo.http_cli import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     _config_values,
+    _legacy_session_option_present,
 )
 from coding_agent_neo.http_cli import (
     build_parser as build_http_parser,
@@ -269,7 +270,11 @@ def run_server(
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse configuration and run the composed Web/API service."""
 
-    args = build_parser().parse_args(argv)
+    arguments = tuple(sys.argv[1:] if argv is None else argv)
+    if _legacy_session_option_present(arguments):
+        print("configuration error: unknown configuration option", file=sys.stderr)
+        return 2
+    args = build_parser().parse_args(arguments)
     try:
         # Validate the build before reading configuration or constructing any
         # API/application objects.  A failed Web launch is therefore a safe,

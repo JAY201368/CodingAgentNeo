@@ -5,7 +5,6 @@ model = "your-model-name"
 api_base = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 workspace = "."
-session_dir = ".coding-agent-neo/sessions"
 approval_mode = "ask"
 
 max_steps = 32

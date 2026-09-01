@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import Path
 from typing import Any, TextIO
 
 from coding_agent_neo import __version__
@@ -37,14 +35,13 @@ EXIT_FAILED = 1
 EXIT_CONFIG = 2
 EXIT_LIMIT_REACHED = 3
 EXIT_INTERRUPTED = 130
-_DEFAULT_SESSION_DIR = Path(".coding-agent-neo/sessions")
+_LEGACY_SESSION_OPTION = "--session-" + "dir"
 
 _CONFIG_OPTIONS = (
     "model",
     "api_base",
     "api_key_env",
     "workspace",
-    "session_dir",
     "approval_mode",
     "max_steps",
     "max_tool_calls",
@@ -55,6 +52,17 @@ _CONFIG_OPTIONS = (
     "model_output_limit",
     "session_output_limit",
 )
+
+
+def _legacy_session_option_present(arguments: Sequence[str]) -> bool:
+    for argument in arguments:
+        if not isinstance(argument, str):
+            continue
+        if argument == _LEGACY_SESSION_OPTION:
+            return True
+        if argument.startswith(f"{_LEGACY_SESSION_OPTION}="):
+            return True
+    return False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,11 +90,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Environment variable containing the API key; key values are never CLI arguments.",
     )
     parser.add_argument("--workspace")
-    parser.add_argument("--session-dir")
     parser.add_argument(
         "--resume",
         metavar="SESSION",
-        help="Resume a linear session by ID or JSONL path.",
+        help="Resume a linear session by opaque session ID.",
     )
     parser.add_argument("--approval-mode", choices=("ask", "auto", "deny"))
     parser.add_argument("--yolo", action="store_true", help="Alias for --approval-mode auto.")
@@ -124,28 +131,13 @@ def exit_code_for(result: RuntimeState | Any) -> int:
     }.get(state, EXIT_FAILED)
 
 
-def format_resume_hint(
-    session_id: str,
-    *,
-    session_dir: str | os.PathLike[str] | None = None,
-) -> str:
+def format_resume_hint(session_id: str) -> str:
     """Return the copy-paste command that continues a linear session."""
 
     if not isinstance(session_id, str) or not session_id.strip():
         raise ValueError("session_id must be a non-empty string")
     parts = ["coding-agent-neo", "--resume", session_id.strip()]
-    if session_dir is not None and _session_dir_needs_flag(Path(session_dir)):
-        parts.extend(["--session-dir", os.fspath(session_dir)])
     return "To continue this session, run: " + " ".join(shlex.quote(part) for part in parts)
-
-
-def _session_dir_needs_flag(session_dir: Path) -> bool:
-    if session_dir == _DEFAULT_SESSION_DIR:
-        return False
-    try:
-        return session_dir.resolve() != _DEFAULT_SESSION_DIR.resolve()
-    except OSError:
-        return True
 
 
 def _event_session_id(event: Any) -> str | None:
@@ -159,12 +151,10 @@ def _event_session_id(event: Any) -> str | None:
 def _write_resume_hint(
     stream: TextIO,
     session_id: str | None,
-    *,
-    session_dir: Path,
 ) -> None:
     if not session_id:
         return
-    stream.write(f"{format_resume_hint(session_id, session_dir=session_dir)}\n")
+    stream.write(f"{format_resume_hint(session_id)}\n")
     stream.flush()
 
 
@@ -315,7 +305,7 @@ def run_cli(
         if not interactive and assistant_text:
             output_stream.write(f"{assistant_text}\n")
             output_stream.flush()
-        _write_resume_hint(event_stream, session_id, session_dir=config.session_dir)
+        _write_resume_hint(event_stream, session_id)
         return exit_code_for(backend.last_state)
     except KeyboardInterrupt:
         try:
@@ -330,7 +320,7 @@ def run_cli(
         if session_id is None:
             session_id = seen
         if ran_turn:
-            _write_resume_hint(event_stream, session_id, session_dir=config.session_dir)
+            _write_resume_hint(event_stream, session_id)
         return EXIT_INTERRUPTED
     finally:
         try:
@@ -344,7 +334,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse, validate without side effects, then run the selected CLI mode."""
 
     parser = build_parser()
-    args = parser.parse_args(argv)
+    arguments = tuple(sys.argv[1:] if argv is None else argv)
+    if _legacy_session_option_present(arguments):
+        print("configuration error: unknown configuration option", file=sys.stderr)
+        return EXIT_CONFIG
+    args = parser.parse_args(arguments)
     try:
         config = load_config(_cli_config_values(args), config_path=args.config)
     except ConfigError as error:

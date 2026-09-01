@@ -40,7 +40,7 @@ flowchart TD
 
 ## Stage B: Persistence and provider
 
-### [ ] T02 — Fix production session storage to the workspace
+### [x] T02 — Fix production session storage to the workspace
 
 **Dependencies:** T01  
 **Scope:** Remove production `session_dir` from configuration, environment/TOML/CLI handling, formatting, help, assembly call sites, examples, and tests. Derive the store directory only from the resolved workspace. Preserve explicit internal test seams only when they cannot be mistaken for production configuration. Do not implement history routes.  
@@ -52,6 +52,8 @@ flowchart TD
 - Configuration, CLI, session recovery, backend, and HTTP integration tests cover the new invariant without weakening unrelated behavior.
 
 **Verification:** `python -m pytest tests/unit/test_config.py tests/integration/test_cli.py tests/integration/test_resume_cli.py tests/unit/test_session_recovery.py tests/unit/test_backend.py tests/transports/test_http_transport.py -q`; `python -m ruff check src tests`; `python -m ruff format --check src tests`.
+
+**Completed 2026-09-01:** Removed production `session_dir` and `--session-dir`, derived new/resumed records only from `<resolved workspace>/.coding-agent-neo/sessions/`, restricted resume to opaque IDs, and rejected existing symlink components/containment escapes without writing outside the workspace. Main-agent verification: focused matrix reported 65 passed with one third-party Starlette warning; Ruff check and format-check passed; `git diff --check` passed. Worker full-suite evidence reported 297 passed with the same warning.
 
 ### [ ] T03 — Provide backend-owned history discovery and resume creation
 

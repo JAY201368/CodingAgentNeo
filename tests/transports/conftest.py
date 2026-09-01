@@ -25,7 +25,6 @@ from coding_agent_neo.models import EventEnvelope, NormalizedAssistantResponse, 
 def _config(tmp_path: Path) -> AppConfig:
     return AppConfig(
         workspace=tmp_path,
-        session_dir=tmp_path / "sessions",
         api_key="placeholder",
         context_window=8000,
         reserved_output_tokens=1000,
