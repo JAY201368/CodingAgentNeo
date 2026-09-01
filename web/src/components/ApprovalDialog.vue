@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 
 import { safeDisplayText } from '../domain/events'
 import type { PendingApproval } from '../domain/protocol'
@@ -21,9 +21,12 @@ const emit = defineEmits<{
   dismiss: []
 }>()
 
-const approveButton = ref<{ focus: () => void } | null>(null)
+const approveButton = ref<HTMLButtonElement | null>(null)
+const reopenButton = ref<HTMLButtonElement | null>(null)
+const dialogElement = ref<HTMLElement | null>(null)
 const open = ref(false)
 const submitted = ref(false)
+let lastFocusedElement: HTMLElement | null = null
 
 function approvalKey(approval: PendingApproval | null): string {
   return approval === null ? '' : `${approval.requestId}\u0000${approval.correlationId}`
@@ -35,21 +38,104 @@ function focusApproval(): void {
   }
 }
 
+function rememberFocus(): void {
+  if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+    lastFocusedElement = document.activeElement
+  }
+}
+
+function restoreFocus(): void {
+  const target = lastFocusedElement
+  lastFocusedElement = null
+  if (
+    target === null ||
+    !target.isConnected ||
+    dialogElement.value?.contains(target) === true
+  ) {
+    return
+  }
+  void nextTick(() => target.focus())
+}
+
+function focusableElements(): HTMLElement[] {
+  const dialog = dialogElement.value
+  if (dialog === null) {
+    return []
+  }
+  return Array.from(dialog.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => !element.hasAttribute('hidden') && element.getAttribute('aria-hidden') !== 'true')
+}
+
+function handleDialogKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' || event.key === 'Esc' || event.key.toLowerCase() === 'esc') {
+    event.preventDefault()
+    closeWithoutDecision()
+    return
+  }
+  if (event.key !== 'Tab') {
+    return
+  }
+  const focusables = focusableElements()
+  if (focusables.length === 0) {
+    event.preventDefault()
+    dialogElement.value?.focus()
+    return
+  }
+  const activeElement = typeof document === 'undefined' ? null : document.activeElement
+  const currentIndex = activeElement === null
+    ? -1
+    : focusables.indexOf(activeElement as HTMLElement)
+  if (event.shiftKey && (currentIndex <= 0 || activeElement === dialogElement.value)) {
+    event.preventDefault()
+    focusables[focusables.length - 1]?.focus()
+  } else if (!event.shiftKey && (currentIndex === focusables.length - 1 || currentIndex < 0)) {
+    event.preventDefault()
+    focusables[0]?.focus()
+  }
+}
+
+function handleDialogFocusout(event: FocusEvent): void {
+  const dialog = dialogElement.value
+  const nextElement = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+  if (!open.value || dialog === null || (nextElement !== null && dialog.contains(nextElement))) {
+    return
+  }
+  // Keep the modal keyboard scope intact when focus leaves through a pointer
+  // or an assistive-technology command instead of a trapped Tab key.
+  void nextTick(() => {
+    if (open.value) {
+      approveButton.value?.focus()
+    }
+  })
+}
+
 watch(() => approvalKey(props.approval), (key) => {
   if (key.length === 0) {
     open.value = false
     submitted.value = false
+    restoreFocus()
     return
   }
+  rememberFocus()
   open.value = true
   submitted.value = false
   focusApproval()
 }, { immediate: true })
 
+onMounted(() => {
+  // An immediate watcher runs before template refs exist on first mount.
+  // Repeat the initial focus once the dialog buttons are in the DOM.
+  if (props.approval !== null) {
+    focusApproval()
+  }
+})
+
 function closeWithoutDecision(): void {
   // Escape, backdrop clicks, unmount, and stream loss never emit a decision.
   open.value = false
   emit('dismiss')
+  void nextTick(() => reopenButton.value?.focus())
 }
 
 function reopen(): void {
@@ -89,6 +175,7 @@ function decide(approved: boolean): void {
       有一个授权请求仍在等待处理；未因 Escape 或关闭对话框而批准。
     </p>
     <button
+      ref="reopenButton"
       class="secondary-action"
       type="button"
       @click="reopen"
@@ -104,6 +191,7 @@ function decide(approved: boolean): void {
     @click.self="closeWithoutDecision"
   >
     <section
+      ref="dialogElement"
       class="approval-dialog"
       role="dialog"
       aria-modal="true"
@@ -111,7 +199,8 @@ function decide(approved: boolean): void {
       aria-describedby="approval-dialog-description"
       :aria-busy="disabled || submitting || submitted"
       tabindex="-1"
-      @keydown.esc.stop.prevent="closeWithoutDecision"
+      @keydown="handleDialogKeydown"
+      @focusout="handleDialogFocusout"
     >
       <div class="section-heading">
         <h2 id="approval-dialog-title">

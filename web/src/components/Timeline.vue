@@ -30,6 +30,8 @@ defineProps<{
       v-else
       class="timeline__list"
       aria-label="Agent 事件列表"
+      aria-live="polite"
+      aria-atomic="false"
     >
       <li
         v-for="item in items"

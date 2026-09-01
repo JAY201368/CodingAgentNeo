@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：T01～T07 已验收；T08～T10 待串行实施
+> 状态：T01～T08 已验收；T09～T10 待串行实施
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -161,7 +161,7 @@ flowchart TD
 
 ## 阶段 D：视觉、组合与交付
 
-### [ ] T08 — 完成极简紫金视觉、响应式与可访问性
+### [x] T08 — 完成极简紫金视觉、响应式与可访问性
 
 **依赖:** T06, T07
 **范围:** 按架构 token 完成浅色主界面、紫金层级、响应式、空/加载/错误态、键盘、语义和 reduced-motion；只优化既有旅程，不新增业务、校徽或部署耦合。
@@ -174,6 +174,8 @@ flowchart TD
 - 无重型组件库、装饰动画、校徽复制或无关 dashboard；视觉检查记录浏览器、尺寸、发现及修正。
 
 **验证:** `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; 人工桌面/360px/键盘/reduced-motion/对比度检查。
+
+**完成摘要（2026-09-01）:** 已在既有用户旅程上交付浅色紫金 token、响应式布局、空/加载/错误状态、文字与图标并用的状态反馈、可见键盘焦点、授权 dialog 焦点约束与恢复、`aria-live`/`aria-busy` 以及 `prefers-reduced-motion` 路径；未增加业务、重型组件库、校徽或部署耦合。主 Agent 复核：Web lint、type-check、build 与 46 项测试均通过；Codex In-app Browser 在 1280×720 和 360×800 下均无横向溢出，状态/错误语义和移动端操作可见可用，授权完整键盘路径及对比度证据记录于 `T08_VISUAL_CHECK.md`。浏览器运行时未提供强制切换系统 reduced-motion 偏好的能力，因此仅核验 CSSOM 规则且未伪造截图；未执行真实模型、公网部署或 T09 组合入口。
 
 ### [ ] T09 — 交付与通用 Agent HTTP 分离的 Web 组合入口
 

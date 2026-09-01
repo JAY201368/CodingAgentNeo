@@ -51,6 +51,7 @@ defineExpose({ clear, unlock })
   <form
     class="composer"
     aria-labelledby="composer-title"
+    :aria-busy="pending"
     @submit.prevent="submit"
   >
     <div class="section-heading">

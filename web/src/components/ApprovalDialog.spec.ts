@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import ApprovalDialog from './ApprovalDialog.vue'
@@ -12,6 +13,38 @@ const approval = {
 } as const
 
 describe('ApprovalDialog', () => {
+  it('moves focus into the dialog, traps Tab, and restores the opener', async () => {
+    const opener = document.createElement('button')
+    opener.type = 'button'
+    document.body.append(opener)
+    opener.focus()
+
+    const wrapper = mount(ApprovalDialog, { props: { approval }, attachTo: document.body })
+    await nextTick()
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.get('.approval-dialog__actions .primary-action').element)
+
+    const dialog = wrapper.get('[role="dialog"]')
+    const buttons = wrapper.findAll('[role="dialog"] button')
+    ;(buttons[2].element as HTMLButtonElement).focus()
+    await dialog.trigger('keydown', { key: 'Tab' })
+    expect(document.activeElement).toBe(buttons[0].element)
+
+    ;(buttons[0].element as HTMLButtonElement).focus()
+    await dialog.trigger('keydown', { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(buttons[2].element)
+
+    opener.focus()
+    await nextTick()
+    expect(document.activeElement).toBe(buttons[0].element)
+
+    await wrapper.setProps({ approval: null })
+    await nextTick()
+    expect(document.activeElement).toBe(opener)
+    wrapper.unmount()
+    opener.remove()
+  })
+
   it('emits at most one exact decision and locks both buttons after the first click', async () => {
     const wrapper = mount(ApprovalDialog, { props: { approval } })
     const buttons = wrapper.findAll('button')

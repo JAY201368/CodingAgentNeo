@@ -72,6 +72,15 @@ const statusLabels: Record<string, string> = {
   FAILED: '执行失败',
 }
 
+const statusMarks: Record<string, string> = {
+  RUNNING: '◌',
+  WAITING_FOR_APPROVAL: '⌁',
+  COMPLETED_TURN: '✓',
+  LIMIT_REACHED: '!',
+  INTERRUPTED: '×',
+  FAILED: '!',
+}
+
 const connectionLabels: Record<string, string> = {
   disconnected: '尚未连接 Agent 服务',
   connecting: '正在连接 Agent 服务…',
@@ -80,7 +89,17 @@ const connectionLabels: Record<string, string> = {
   error: 'Agent 服务暂时不可用',
 }
 
+const connectionMarks: Record<string, string> = {
+  disconnected: '○',
+  connecting: '◌',
+  connected: '●',
+  closed: '×',
+  error: '!',
+}
+
 const statusLabel = computed(() => statusLabels[session.state.value.status] ?? '状态未知')
+const statusMark = computed(() => statusMarks[session.state.value.status] ?? '?')
+const connectionMark = computed(() => connectionMarks[session.state.value.connection] ?? '?')
 const connectionLabel = computed(() => {
   if (isConnected.value && !session.state.value.streamAvailable) {
     return streamRetryExhausted.value ? '事件流已断开' : '事件流连接中…'
@@ -272,13 +291,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="app-shell">
+  <main
+    class="app-shell"
+    aria-labelledby="app-title"
+  >
     <header class="app-header">
       <div>
         <p class="eyebrow">
           CodingAgentNeo
         </p>
-        <h1>
+        <h1 id="app-title">
           CodingAgentNeo Web
         </h1>
         <p class="app-header__subtitle">
@@ -291,7 +313,11 @@ onBeforeUnmount(() => {
           role="status"
           aria-live="polite"
         >
-          {{ connectionLabel }}
+          <span
+            class="status-mark"
+            aria-hidden="true"
+          >{{ connectionMark }}</span>
+          <span>{{ connectionLabel }}</span>
         </p>
         <p
           v-if="isConnected"
@@ -300,7 +326,11 @@ onBeforeUnmount(() => {
           role="status"
           aria-live="polite"
         >
-          {{ statusLabel }}
+          <span
+            class="status-mark"
+            aria-hidden="true"
+          >{{ statusMark }}</span>
+          <span>{{ statusLabel }}</span>
         </p>
       </div>
     </header>
@@ -309,8 +339,13 @@ onBeforeUnmount(() => {
       v-if="displayError"
       class="alert"
       role="alert"
+      aria-live="assertive"
     >
-      {{ displayError }}
+      <span
+        class="alert__mark"
+        aria-hidden="true"
+      >!</span>
+      <span>{{ displayError }}</span>
     </section>
 
     <section
@@ -352,6 +387,8 @@ onBeforeUnmount(() => {
         v-if="showStop"
         class="run-controls"
         aria-labelledby="run-controls-title"
+        aria-live="polite"
+        :aria-busy="interruptSubmitting"
       >
         <div>
           <h2 id="run-controls-title">
@@ -475,7 +512,24 @@ onBeforeUnmount(() => {
       role="status"
       aria-live="polite"
     >
-      尚未连接 Agent 服务
+      <span
+        class="loading-mark"
+        aria-hidden="true"
+      >○</span>
+      <span>尚未连接 Agent 服务</span>
+    </p>
+    <p
+      v-else-if="connecting"
+      class="loading-note"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <span
+        class="loading-mark"
+        aria-hidden="true"
+      >◌</span>
+      <span>正在连接 Agent 服务…</span>
     </p>
   </main>
 </template>
