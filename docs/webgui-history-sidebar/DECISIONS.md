@@ -55,3 +55,9 @@
 - 选择：绑定新 transport 时 `CONNECTED` 的 cursor 固定为 `0`，resume 响应 cursor 只作 hydration 完成后的对照；`readSessionHistoryEvents` 返回的 camelCase domain envelope 在 dispatch 前再编码为 `schema_version`/`session_id` wire 对象。
 - 理由与替代：resume 响应 cursor 是恢复文件最后 sequence。若把它当作 reducer 起点，历史事件会被当成重复而全部忽略。T01 的 history parser 产出 domain envelope，而 reducer 的 `EVENT` 路径与 live SSE 一样只吃未信任 wire JSON。在 composable 边界再编码，可复用同一套幂等/跳号/未知/截断降级，避免第二套投影。替代方案是让 reducer 同时接受 camelCase，或让 T01 暴露原始 JSON——前者扩大 reducer 契约，后者回退 T01。
 - 后果：hydration 结束后 reducer cursor 收敛到恢复文件最后成功消费的 sequence；`startEvents()` 必须从该 cursor 订阅（`sequence > cursor`）。T05 接线时不要把 resume cursor 写入 reducer，也不要把 historySessionId 写入 localStorage。
+
+## 2026-09-01 — T03：列表错误保留上一页，`loading` 只覆盖首页/刷新
+
+- 选择：`useSessionHistory` 的 `error` 为 `{code, message}`，message 只取 T01 `AgentApiError`/`AgentNetworkError` 的客户端短句；`loading` 仅在首次加载与 `refresh()` 期间为 true，`loadMore` 用内部 in-flight 闸门防重入。刷新/追加失败时保留上一页成功 `items` 并单独标 error。默认 `autoLoad` 在 composable 创建时立即请求（与 `useAgentSession` 一致），请求只带 `AbortSignal`，不传默认 `limit`/`cursor`。
+- 理由与替代：架构允许「保留上一页并单独标 error」，这样错误与「纯空成功」可区分，也不会在翻页失败时把已渲染列表清空。把 `loading` 限于替换型加载，避免 T04 把「加载更多」误显示成整表 spinner。替代方案是失败即清空 items，或把 loadMore 也算进 `loading`，都会让三态或分页控件更难用。
+- 后果：T04 应以 `error !== null` 作为错误态，不要用 `items.length===0` 兼做错误；「加载更多」进行中 `loading` 仍为 false，重复点击由 composable no-op。列表不持久化、不与 live session 命令互斥。

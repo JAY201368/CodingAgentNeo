@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Execute（T01–T02 已验收；其余任务串行派发中）
+> 状态：Execute（T01–T03 已验收；其余任务串行派发中）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -63,7 +63,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）：** 已交付 `resumeSession(historySessionId)`：先校验 canonical ID，再 `stopEvents` → DELETE 当前 transport（404/410 幂等）→ RESET → resume 创建 → 从 cursor 0 hydration → 从 reducer cursor 接续 SSE。`switching` 防重入；创建失败 fail-closed 不自动重建。主 Agent 复跑 lint/type-check/`test -- src/composables`（30 passed）/build 通过。未实现列表 composable 与视图。
 
-### [ ] T03 — 交付历史列表状态与分页 composable
+### [x] T03 — 交付历史列表状态与分页 composable
 
 **依赖：** T01
 **范围：** 新增 `web/src/composables/useSessionHistory.ts`，管理历史列表的加载、分页（`next_cursor` 原样回送）、刷新、加载中/空/错误态，暴露 `items`、`loading`、`error`、`hasMore`、`refresh()`、`loadMore()`。只调用 T01 的 `listSessionHistory`，与 live session 状态解耦。排除历史事件读取、resume、视图与布局。
@@ -76,6 +76,8 @@ flowchart TD
 - composable 不直接 fetch（只经 wire client）、不改写后端事实、不与 live session 命令互斥、不持久化历史列表。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/composables`；`npm --prefix web run build`。
+
+**完成摘要（2026-09-01）：** 已交付 `useSessionHistory`：首次无 cursor 加载、`next_cursor` 原样翻页并按 session_id 去重追加、refresh 清错误、loading/空/错误三态互斥。`loading` 仅覆盖首页/刷新；失败保留上一页。主 Agent 复跑 lint/type-check/`test -- src/composables`（42 passed）/build 通过。未实现侧边栏视图。
 
 ## 阶段 C：侧边栏视图与布局整合
 

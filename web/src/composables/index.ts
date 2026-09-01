@@ -15,3 +15,9 @@ export type {
   PersistedTransportSession,
   UseAgentSessionOptions,
 } from './useAgentSession'
+export { useSessionHistory } from './useSessionHistory'
+export type {
+  SessionHistoryController,
+  SessionHistoryError,
+  UseSessionHistoryOptions,
+} from './useSessionHistory'

@@ -4,6 +4,7 @@
 
 - T01 — 历史列表/事件/恢复 wire client 与防御性 DTO：`GET /api/v1/session-history`、`GET /api/v1/session-history/{id}/events`、`POST /api/v1/sessions`（缺省 `{}` 或仅含 `resume_session_id`）按 transport 4.2/4.5.1 消费；非法 ID/cursor/limit 在发请求前失败；稳定码不透传后端正文；共享 `transport-v1.json` 样例。2026-09-01 主 Agent 复跑 Web lint/type-check/test(42 passed)/build/`git diff --check` 通过。
 - T02 — resume 旅程与历史 hydration：`resumeSession` 按终结→RESET→创建→hydration→SSE 执行；绑定新 transport 时 hydration 从 cursor 0 起步；创建失败 fail-closed；localStorage 只写新 transport ID/cursor。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/composables`（30 passed）/build 通过。
+- T03 — 历史列表状态与分页 composable：`useSessionHistory` 首次无 cursor 加载、原样回送 `next_cursor` 翻页、refresh 清错误、loading/空/错误三态互斥；失败保留上一页。2026-09-01 主 Agent 复跑 lint/type-check/`test -- src/composables`（42 passed）/build 通过。
 
 ## Current State
 
@@ -16,8 +17,15 @@
   - 绑定新 transport 时 **不用** resume 响应 cursor 作为 hydration 起点；历史事件从 `since=0` 注入，由 reducer 推进 cursor；live SSE 使用 hydration 后的 reducer cursor（`sequence > cursor`）。
   - 先终结后创建失败（404/422/409 稳定码或创建阶段网络失败）进入 `SESSION_UNAVAILABLE`：无活跃 transport、不自动新建、不重放 POST；错误用 T01 客户端安全短句。DELETE 网络失败则停止、不 POST resume。
   - localStorage 只写新 transport ID/cursor，不写 historySessionId。恢复后 `finalAssistantText` / `projectTimeline` 可重现历史消息，`COMPLETED_TURN` 后可 `submitTask` follow-up。
-  - 未实现 `useSessionHistory`、`HistorySidebar`、App 布局或视觉。
+  - 未实现 `HistorySidebar`、App 布局或视觉。
   - Worker 验证：`npm --prefix web run lint`、`type-check`、`test -- src/composables`（30 passed）、`build` 均通过。
+- T03 已验收。可观察行为：
+  - `useSessionHistory({ client?, autoLoad? })` 管理历史列表：`items`、`loading`、`error`、`hasMore`、`refresh()`、`loadMore()`。默认 `autoLoad=true` 在 composable 创建时调用 `listSessionHistory({ signal })`，不传 cursor、不传默认 limit。
+  - `loadMore()` 把上次 `next_cursor` **原样**作为 `cursor` 回送并按 `session_id` 去重追加；`hasMore === (next_cursor !== null)`；无 cursor 或已有 in-flight 请求时 no-op。
+  - `refresh()` 立即清 error、中止过期 loadMore（generation + AbortController），无 cursor 重载首页。
+  - 三态互斥：`loading` 仅覆盖首次/刷新；空 = 非 loading 且 `items.length===0` 且 `error===null`；错误为 `{code, message}`（T01 客户端短句），失败时保留上一页 items，不假装完整成功列表。
+  - 不调用 `readSessionHistoryEvents`/`createSession`/`resumeSession`，不 import `useAgentSession`，不写 localStorage，不与 live 命令互斥。
+  - 主 Agent 复跑（2026-09-01）：`npm --prefix web run lint` 通过；`type-check` 通过；`test -- src/composables` 42 passed（含既有 T02 30 + T03 12）；`build` 通过。
 
 ## Known Issues
 
@@ -30,4 +38,4 @@
 
 ## Next Recommended Task
 
-- T03 — 交付历史列表状态与分页 composable。依赖 T01；新增 `useSessionHistory`，排除历史事件读取、resume、视图与布局。
+- T04 — 交付可 resume session 侧边栏组件。依赖 T03；新增 `HistorySidebar.vue` 展示型组件，排除 App 布局改造、resume 接线与最终视觉细节。
