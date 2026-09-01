@@ -47,4 +47,15 @@ describe('timeline projection', () => {
     expect(items[0].text).toContain('内容已截断')
     expect(items[1].text).toBe('Assistant 文本不可用')
   })
+
+  it('shows canonical turn-end assistant text in the timeline', () => {
+    const event = envelopeAt(3)
+    const [item] = projectTimeline([{
+      ...event,
+      type: 'turn_end',
+      payload: { state: 'COMPLETED_TURN', assistant_text: 'canonical answer' },
+    }])
+
+    expect(item.text).toBe('canonical answer')
+  })
 })

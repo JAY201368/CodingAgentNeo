@@ -4,11 +4,9 @@ import { computed, ref, watch } from 'vue'
 const props = withDefaults(defineProps<{
   readonly disabled?: boolean
   readonly pending?: boolean
-  readonly statusReason?: string
 }>(), {
   disabled: false,
   pending: false,
-  statusReason: '',
 })
 
 const emit = defineEmits<{
@@ -50,48 +48,35 @@ defineExpose({ clear, unlock })
 <template>
   <form
     class="composer"
-    aria-labelledby="composer-title"
+    aria-label="任务输入"
     :aria-busy="pending"
     @submit.prevent="submit"
   >
-    <div class="section-heading">
-      <h2 id="composer-title">
-        新任务
-      </h2>
-      <span class="section-heading__hint">单 turn，按顺序执行</span>
-    </div>
     <label
       class="sr-only"
       for="task-input"
     >
       任务内容
     </label>
-    <textarea
-      id="task-input"
-      v-model="text"
-      class="composer__input"
-      rows="4"
-      :disabled="disabled || pending"
-      :aria-describedby="statusReason ? 'composer-help' : undefined"
-      placeholder="告诉 Agent 你想完成什么…"
-      @keydown.ctrl.enter.prevent="submit"
-      @keydown.meta.enter.prevent="submit"
-    />
-    <div class="composer__footer">
-      <p
-        v-if="statusReason"
-        id="composer-help"
-        class="composer__reason"
-        role="status"
-      >
-        {{ statusReason }}
-      </p>
+    <div class="composer__field">
+      <textarea
+        id="task-input"
+        v-model="text"
+        class="composer__input"
+        rows="4"
+        :disabled="disabled || pending"
+        placeholder="告诉 Agent 你想完成什么…"
+        @keydown.ctrl.enter.prevent="submit"
+        @keydown.meta.enter.prevent="submit"
+      />
       <button
-        class="primary-action"
+        class="composer__send"
         type="submit"
         :disabled="!canSubmit"
+        aria-label="发送任务"
+        title="发送任务"
       >
-        {{ pending ? '提交中…' : '发送任务' }}
+        <span aria-hidden="true">↑</span>
       </button>
     </div>
   </form>

@@ -13,6 +13,8 @@
 - baseline 的完成记录是历史证据，不因移动模块而改写；增量任务必须用兼容测试证明没有降低既有行为。
 - 全部验收有实际证据且主 Agent 独立复核后，才勾选任务并追加日期、行为、边界与真实结果。
 
+> UI 收敛说明（2026-09-01）：T05–T08 的卡片、验收条目和完成摘要记录各任务当时的真实交付，不回写为未发生。其后用户确认的当前界面已改为整页消息流、固定底部箭头 composer、标题栏仅保留结束 Session、按 turn 折叠思考过程及消息尾部动态入口；它 supersede 下文历史记录中的内部 timeline 卡片、独立最终回复/Session 生命周期/工具生命周期/运行 Stop 卡和顶部状态徽章。当前权威展示见 [ARCHITECTURE.md](ARCHITECTURE.md#35-当前-web-消息流与控制布局) 与 [requirement.md](requirement.md#当前-web-对话界面要求)。
+
 ## 依赖总览
 
 ```mermaid
@@ -125,6 +127,8 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** 已将 T04 session 核接入 Vue，交付自动创建 transport session、非空任务 composer、重复提交锁、按 sequence 的用户/assistant/运行/错误/结束时间线、`turn_end.assistant_text` 优先的最终回复以及 COMPLETED_TURN follow-up/终止态 gate。长文本以纯文本有界展示并可展开，未知/缺失/截断 payload 降级，普通 tool failure 不改写 session FAILED；稳定 400/409/410 code 均映射为安全提示，POST 不重放。主 Agent 复核：Web 24 passed、lint/type-check/build、transport + frontend contract 19 passed及静态安全/diff 扫描均通过；Python 集成需显式 `NO_PROXY/no_proxy=127.0.0.1,localhost` 避开本机代理，仅有 Starlette 弃用警告。scripted fake 经真实 Backend Service + HTTP adapter 验证无授权 turn 到 `turn_end`；未执行真实模型、真实浏览器或公网部署，approval、精细工具卡和刷新重连留待后续卡。
 
+**后续 UI 收敛:** sequence 有序投影仍保留，但当前不显示“事件时间线”标题或独立最终回复卡。用户消息始终在右侧，`turn_end` 最终回复在左侧，其余事件按 turn 默认折叠为“展开思考过程”；编号仅在展开该 turn 时显示。
+
 ### [x] T06 — 交付工具生命周期、授权与主动中断
 
 **依赖:** T05
@@ -141,6 +145,8 @@ flowchart TD
 **验证:** `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; `.venv/bin/python -m pytest tests/transports tests/unit/test_backend.py tests/integration/test_frontend_contract.py`。
 
 **完成摘要（2026-09-01）:** 已交付按 canonical correlation ID 聚合的工具生命周期卡片、唯一 pending approval dialog、批准/拒绝单次锁和 RUNNING/WAITING Stop；只展示后端脱敏摘要与状态/耗时/退出码/超时/截断事实，不执行 tool/arguments。ApprovalResponse 202 后保持锁定直至匹配 `policy_decision`，Interrupt 202 后锁到结束边界；Escape、断线、unmount、空或不匹配 ID 均不产生批准，无效授权保留 Stop，普通 tool failure 不改写 session FAILED。主 Agent 复核：Web 39 passed、lint/type-check/build、Python adapter/backend/frontend 31 passed、静态安全与 diff check 均通过；Python 回环集成显式设置 `NO_PROXY/no_proxy=127.0.0.1,localhost`，仅有 Starlette 弃用警告。未执行真实模型、真实浏览器或公网部署，刷新重连与最终可访问性打磨留待 T07/T08。
+
+**后续 UI 收敛:** approval 的 request ID、单次响应和 fail-closed 行为不变；独立工具生命周期大卡及运行 Stop/取消控件已从当前界面移除。工具、策略与结果事件只在对应 turn 的折叠思考过程中显示，运行时发送箭头原位变灰。
 
 ### [x] T07 — 交付 follow-up、刷新重连与健壮事件消费
 
@@ -159,6 +165,8 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** 已交付同一 backend session 的线性 follow-up、刷新先 GET 校验 transport ID 再从浏览器最后成功 cursor 重订阅、仅 GET/SSE 的有限指数退避、跳号补回、陈旧 ID 清理及显式 DELETE 结束；POST 不重放，unmount 只停止 SSE。主审退回修正两处 fail-open 后，重新 attach 的 `RUNNING` 歧义快照在 canonical `turn_end/session_end` 前锁定新任务，且 `agent_end` 终止态立即优先禁止 Stop/提交。主 Agent 复核：Web 45 passed、lint/type-check/build、transport/frontend/resume Python 27 passed、卸载/安全与 diff 扫描均通过；回环测试显式设置 `NO_PROXY/no_proxy=127.0.0.1,localhost`，仅有 Starlette 弃用警告。服务器重启后的历史 resume、输入排队、并发 session、真实模型/浏览器/公网验证均未声称完成。
 
+**后续 UI 收敛:** 显式结束入口现位于标题栏右侧。结束确认后，页面在消息流末尾显示单行“当前 Session 已结束 / 新建 session”并自动滚动到该处；仅恢复场景显示“当前 Session 连接已中断 / 重新连接”。错误、重连、授权、诊断和 Session 入口也统一追加到消息尾部。
+
 ## 阶段 D：视觉、组合与交付
 
 ### [x] T08 — 完成极简紫金视觉、响应式与可访问性
@@ -176,6 +184,8 @@ flowchart TD
 **验证:** `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; 人工桌面/360px/键盘/reduced-motion/对比度检查。
 
 **完成摘要（2026-09-01）:** 已在既有用户旅程上交付浅色紫金 token、响应式布局、空/加载/错误状态、文字与图标并用的状态反馈、可见键盘焦点、授权 dialog 焦点约束与恢复、`aria-live`/`aria-busy` 以及 `prefers-reduced-motion` 路径；未增加业务、重型组件库、校徽或部署耦合。主 Agent 复核：Web lint、type-check、build 与 46 项测试均通过；Codex In-app Browser 在 1280×720 和 360×800 下均无横向溢出，状态/错误语义和移动端操作可见可用，授权完整键盘路径及对比度证据记录于 `T08_VISUAL_CHECK.md`。浏览器运行时未提供强制切换系统 reduced-motion 偏好的能力，因此仅核验 CSSOM 规则且未伪造截图；未执行真实模型、公网部署或 T09 组合入口。
+
+**后续 UI 收敛:** 当前消息不再在卡片内滚动，而是随整页自然增高；composer 固定在视口底部并叠加于消息区之上，右下角使用圆形上箭头发送。标题栏不再显示连接/运行徽章，只保留“结束 Session”。这些后续布局尚未新增一轮真实浏览器视觉验收，不能用本卡旧截图冒充当前布局证据。
 
 ### [x] T09 — 交付与通用 Agent HTTP 分离的 Web 组合入口
 

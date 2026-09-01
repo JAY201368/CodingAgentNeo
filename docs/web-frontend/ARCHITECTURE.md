@@ -1,7 +1,7 @@
 # CodingAgentNeo 前端接入与 Web 前端增量架构
 
 > 状态：T01–T10 已实施并通过最终验收
-> 架构版本：0.3
+> 架构版本：0.4
 > 日期：2026-09-01
 > 需求入口：[requirement.md](requirement.md)
 > Agent 后端规范：[../agent-backend-interface.md](../agent-backend-interface.md)
@@ -17,7 +17,7 @@
 
 1. CLI 继续保持原有命令、stdio、退出码、approval、resume 和性能，但明确通过 `InProcessAdapter` 接入 Agent 应用端口。
 2. Agent 提供独立于任何 UI 技术的本地 HTTP/SSE Adapter，使 Web 与未来进程外前端平等消费相同命令、事件、状态和授权语义。
-3. Vue 用户能提交任务、观察 assistant/工具/重试/压缩/错误、处理授权、主动中断、成功 turn 后 follow-up，并在同一服务进程内刷新重连。
+3. Vue 用户能提交任务、观察 assistant/工具/重试/压缩/错误、处理授权、在成功 turn 后 follow-up，并在同一服务进程内刷新重连；Agent adapter 保留 `Interrupt` command，但当前 Web 不提供运行中 Stop/取消控件。
 4. 两种 adapter 使用同一 conformance suite，证明语义等价；传输差异不得扩散到 Agent Core。
 5. Web 在桌面与窄屏上保持极简、浅色、现代、键盘可用的南大紫金视觉。
 
@@ -109,6 +109,14 @@ flowchart LR
 - tool result 的非成功状态不等同 session FAILED；未知/截断 payload 降级显示。
 - adapter 返回安全错误，不泄露 traceback、任务正文、配置、provider 正文或 key。
 
+### 3.5 当前 Web 消息流与控制布局
+
+Web 展示采用整页对话流，而不是带内部滚动条的 timeline 卡片：消息区随 turn 和事件自然增高，浏览器页面负责上下滚动；固定在视口底部、`z-index` 高于消息区的 composer 覆盖显示，并由页面底部留白避免遮挡末尾内容。composer 内只保留右下角圆形上箭头发送控件，运行期间该控件原位变灰并禁用；运行中不提供 Stop/取消入口。
+
+每个 turn 按下列稳定顺序投影：右侧、始终可见的用户消息；左侧最终回复上方的“展开思考过程”折叠入口；左侧 `turn_end` 最终回复。除 `user_message` 和 `turn_end` 外的 assistant、工具、策略、结果、错误、状态及未知事件均进入该 turn 的过程组，默认不展开；工具结果不得再形成独立生命周期大卡。sequence 编号默认隐藏，只有展开对应 turn 时才在该 turn 的用户、过程和最终回复卡头部出现。
+
+标题栏右侧只提供显式“结束 Session”。连接/运行徽章、独立最终回复卡、Session 生命周期卡、“事件时间线”标题以及运行 Stop 卡均不属于当前布局。显式结束被后端确认后，消息流末尾追加单行“当前 Session 已结束 / 新建 session”入口并滚动到它；可恢复的断线入口使用“当前 Session 连接已中断 / 重新连接”。错误、SSE 重连、授权交互、诊断与 Session 入口统一位于消息流尾部。普通事件到达时仅在页面原本接近底部时自动跟随，避免打断用户向上阅读。
+
 ## 4. 模块所有权
 
 | 模块 | 拥有 | 禁止拥有/依赖 |
@@ -124,7 +132,7 @@ flowchart LR
 | `web/src/api/` | Agent HTTP wire client、错误归一化 | Python 对象、Agent 决策、密钥 |
 | `web/src/domain/` | 防御性 event parser/reducer、展示模型 | 网络和副作用 |
 | `web/src/composables/` | Web session/游标/命令互斥 | 后端事实改写 |
-| `web/src/components/` | timeline、tool、approval、composer、status | 直接 fetch/localStorage、命令 schema 发明 |
+| `web/src/App.vue` + `web/src/components/` | 整页消息流组合、消息尾部动态入口、按 turn 投影、approval 与固定 composer | 直接 fetch/localStorage、命令 schema 发明 |
 
 禁止依赖：`transports/http -> transports/in_process`、`transports/http -> web`、`web -> Python 源码`、`backend.py/backend_service.py -> 任何具体 adapter`。只有 composition roots 可以同时看见 port、service factory 和具体 adapter。
 
@@ -137,7 +145,7 @@ flowchart LR
 | `AgentCommand` | type + command fields | 不可变、可 JSON 化；adapter 不新增业务命令 |
 | `EventEnvelopeV1` | IDs、sequence、type、timestamp、payload | Store-first canonical fact；HTTP 只编码 |
 | `TransportSession` | transport ID、backend、cursor、closed | transport ID 与所有 Agent ID 分离；HTTP registry 独占生命周期 |
-| `TimelineItem` | event ID、sequence、kind、summary/detail | 纯投影、重复幂等、未知安全降级 |
+| `TimelineItem` | event ID、sequence、kind、summary/detail | 纯投影、重复幂等、未知安全降级；展示层再按 turn 分组并折叠过程事件 |
 | `PendingApproval` | request ID、tool、summary、timeout | 同时最多一个；只回送原 ID；断线不批准 |
 
 浏览器文本按纯文本渲染，禁止未清洗 `v-html`。localStorage 只保存 transport ID/cursor，不保存任务、事件、workspace、配置或 secret。
@@ -196,12 +204,12 @@ In-process Python binding 与 HTTP `/api/v1`、session、JSON 错误、SSE frame
 | 通用 Agent HTTP/SSE Adapter | 1、3.2、4、6.2 | T02 |
 | Vite + Vue 轻量前端 | 2、3.3、4 | T03～T05 |
 | 授权、中断、follow-up、重连 | 3.3～3.4、5～6 | T06～T07 |
-| 极简浅色南大紫金、可访问 | 2.1、7～8 | T08 |
+| 极简浅色南大紫金、可访问、整页对话布局 | 2.1、3.5、7～8 | T08 + 后续 UI 收敛 |
 | Web 与 Agent adapter 分离、一键组合 | 3、4、8.1 | T09 |
 | 可复现交付与语义一致性 | 6.3、8 | T01、T02、T10 |
 
 ## 10. 变更控制
 
-本次架构 0.3 supersede 0.2 中“HTTP factory 创建 In-process AgentBackend”和“In-process Adapter 拥有 worker/事件缓冲/授权通道”的认知；这些共享执行职责现归属 Backend Service/Runtime。架构 0.2 对 0.1 中“HTTP adapter 属于 Web 产品、直接托管 `web/dist`”的废止仍有效。FastAPI/SSE、TypeScript/npm、仅回环和视觉 token 仍是可逆技术选择。
+本次架构 0.4 增补当前 Web 展示架构，并 supersede T05–T08 初始交付中的内部 timeline 滚动、独立最终回复/Session 生命周期/工具生命周期/运行 Stop 卡及顶部状态徽章；这些条目的历史验收事实仍保留。架构 0.3 对 0.2 中“HTTP factory 创建 In-process AgentBackend”和“In-process Adapter 拥有 worker/事件缓冲/授权通道”的废止，以及架构 0.2 对 0.1 中“HTTP adapter 属于 Web 产品、直接托管 `web/dist`”的废止仍有效。FastAPI/SSE、TypeScript/npm、仅回环和视觉 token 仍是可逆技术选择。
 
 改变应用端口、wire protocol、状态、approval、游标、网络暴露、安全或部署边界时，先更新对应权威规范、本文、任务和决策。若实现需要修改 Agent Loop/Tool/Policy/Environment/Session 语义来迁就 HTTP 或 Vue，停止当前任务并发起跨基线变更控制。

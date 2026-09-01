@@ -15,23 +15,27 @@
 
 - T10 — 已新增 `tests/acceptance/test_web_frontend_acceptance.py` 聚合验收：使用真实 `AgentBackendService`、本机 uvicorn/httpx 和 HTTP/SSE wire，脚本化覆盖任务、工具 success/error、授权批准/拒绝、follow-up、SSE 断线补回、Interrupt 的 `turn_end → agent_end → session_end` 终止链，以及未知/整体截断 payload 透传；另含 backend/service、HTTP adapter、Web `.ts`/`.vue` 的依赖、secret 与资源边界断言。主 Agent 最终复核：新增 5 passed、acceptance marker 55 passed、Python 全量 291 passed；Web lint/type-check/test（46）/build、Ruff lint/format、`.venv/bin/python -m build`、三个 CLI help、生产依赖树、wheel 内容、workflow validator、静态扫描与 diff check 均通过。用户接管 npm 依赖安装后，本轮未再运行 `npm ci`/`npm install`，使用其现有依赖执行并通过全部 Web 门；T03 已保留此前 `npm ci` 通过证据。测试模型/环境仍为 fake/scripted，未冒充真实网关、宿主 shell 隔离或公网部署。
 
+- Post-T10 UI 收敛（2026-09-01）— 当前实现已改为整页消息流和浏览器级滚动，composer 固定在视口底部并以高层级叠加，文本框右下角使用圆形上箭头发送且运行时原位变灰。标题栏右侧只保留“结束 Session”；用户消息始终显示在右侧，`turn_end` 最终回复显示在左侧，其余事件按 turn 默认折叠为“展开思考过程”，sequence 编号只在展开该 turn 时显示。已移除“事件时间线”标题、独立最终回复/Session 生命周期/工具生命周期/运行 Stop 卡、连接与运行徽章。错误、SSE 重连、授权、诊断及 Session 入口统一追加到消息流末尾；显式结束成功后显示单行“当前 Session 已结束 / 新建 session”并自动滚动到该入口，恢复场景则显示“当前 Session 连接已中断 / 重新连接”。T05–T08 的旧描述保留为当时历史证据，由本条 supersede 其展示形态；未新增真实浏览器视觉检查，不把 T08 的旧 IAB 记录冒充当前布局验证。
+
 ## Current State
 
 - 2026-08-31 已完成 Bootstrap 及两轮 Change control：`docs/agent-backend-interface.md` 定义 Port 与共享 Backend Service 语义；`docs/agent-transport-interface.md` 是并列 In-process/HTTP binding、HTTP wire/event schema 与共享 adapter 规则的唯一前端接入权威。前端实现 adapter 接入时需要且只需要参考该文档。
 - 既有 Python Agent 后端与 CLI 基线保持不变；HTTP/SSE Agent binding 已可独立运行，`web/` 可独立启动并通过 Vite `/api` 代理连接本地 Agent HTTP。
 - 当前增量 T01～T10 已全部实施并由主 Agent 验收；Web 组合入口默认读取源码树或 `--dist-dir` 提供的已构建 Web 目录，服务器重启后的历史恢复仍不在首版范围。
+- 当前 Web UI 以 [ARCHITECTURE.md 的消息流布局](ARCHITECTURE.md#35-当前-web-消息流与控制布局) 为准：页面整体滚动、底部固定 composer、按 turn 折叠过程事件，所有运行时附加入口位于消息尾部。Port、wire、approval、安全和部署契约未随本轮纯展示收敛改变。
 
 ## Known Issues
 
 - FastAPI + SSE、Vue TypeScript/npm、仅回环部署和金色 Web token 仍是可逆技术选择；用户已明确确认 adapter 所有权和显式 In-process 拆分方向。
 - 南京大学官方规范明确的是标准紫 CMYK 值；架构中的紫色 HEX 是屏幕近似换算，金色 HEX 是产品视觉 token，不声称为校方发布的官方数字色值。
 - `backend.py` 的旧实现名称仅通过懒兼容别名保留；共享实现和执行职责已在 `backend_service.py`，CLI 使用 `transports/in_process.py` 的薄 binding。
-- HTTP binding、T03 Web 工程与 T04 浏览器 wire/session 核已交付；完整 timeline、刷新重连、T07 生命周期收口、T08 视觉和 T09 静态组合均已交付；静态资源仍要求先构建或显式传入外置目录。
+- HTTP binding、T03 Web 工程与 T04 浏览器 wire/session 核已交付；完整消息流、刷新重连、T07 生命周期收口、T08 视觉和 T09 静态组合均已交付；静态资源仍要求先构建或显式传入外置目录。
 - 测试使用 fake backend 与 scripted model；live conformance 仅验证本地 uvicorn/HTTP wiring，未执行真实模型网关、真实浏览器或公网/局域网部署验证。
 - 首版规划不支持服务器重启后的 Web session resume；只支持对仍存活本地进程的刷新重连。
 - T03 的额外 `npm audit --omit=dev` 在当前华为云 npm 镜像上因 audit POST 端点返回 405，未形成依赖审计通过证据；任务要求的 `npm ci`、lint、type-check、test 和 build 均已通过。
 - T07 的刷新重连仅承诺仍存活 Agent HTTP 进程中的 transport session；服务器重启或未知/已关闭 session 会清除标识并要求新建，不能恢复历史 timeline。测试使用 fake fetch、scripted service 和本地 HTTP wiring，未声称真实模型、真实浏览器或公网部署证据。
 - T08 的 reduced-motion 规则已在真实 IAB CSSOM 中确认，但该浏览器运行时未提供直接切换系统 reduced-motion 偏好的能力；因此未伪造强制偏好截图。无装饰动画的正常路径、静态规则与自动化质量门均已检查。
+- T08 的人工矩阵记录的是 UI 收敛前仍包含独立工具卡和 Stop 的历史界面；当前整页消息流、固定 composer 和折叠思考过程尚无新增真实浏览器视觉验收记录。
 - T10 最终验收从本机 `uv` 缓存离线补齐 Python 构建后端后，`.venv/bin/python -m build` 已通过；默认 `web/dist` 已由 Web build 生成但保持 gitignored。
 
 ## Next Recommended Task

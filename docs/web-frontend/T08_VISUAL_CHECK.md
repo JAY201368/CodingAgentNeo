@@ -4,6 +4,8 @@
 
 本记录只覆盖 T08：既有单 Agent session 旅程的浅色紫金视觉、窄屏布局、状态可辨识度、键盘与 reduced-motion 路径。没有新增业务、事件/wire 字段、路由、部署入口、校徽或 UI 组件库。
 
+> 历史证据说明：下列 IAB 矩阵记录的是 T08 验收当时的界面，其中仍有独立工具卡、Stop 和状态展示。后续 UI 已收敛为整页消息流、固定底部箭头 composer、按 turn 折叠思考过程及消息尾部动态入口；因此本表只证明当时版本，不作为当前布局的真实浏览器视觉验证。当前设计以 [ARCHITECTURE.md](ARCHITECTURE.md#35-当前-web-消息流与控制布局) 为准。
+
 ## 人工浏览器矩阵
 
 检查表面：Codex In-app Browser（IAB），本地 Vite 页面通过 `http://127.0.0.1:5173/` 访问；完整旅程使用本地 scripted HTTP 演示服务，仅生成脱敏演示事件，不代表真实模型或公网部署。
@@ -39,3 +41,7 @@
 
 - `ApprovalDialog.spec.ts` 新增真实 DOM focus 初始定位、Tab 环绕、focusout 保护、Escape fail-closed 和 opener 恢复断言。
 - `npm --prefix web run lint`、`npm --prefix web run type-check`、`npm --prefix web run test`（46 passed）和 `npm --prefix web run build` 均通过。
+
+## 后续 UI 文档核对
+
+2026-09-01 对当前模板、样式和组件测试做了静态核对：消息区无内部固定高度/滚动容器；composer 使用固定定位且发送箭头在运行中禁用；标题栏只保留结束 Session；用户/最终回复左右分列，过程事件默认折叠；错误、SSE 重连、授权、诊断和 Session 入口位于消息尾部；结束 Session 后入口滚动到可见位置。该核对不是新的真实浏览器视觉检查，故未追加桌面、360px、键盘或 reduced-motion 的“通过”结论。

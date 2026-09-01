@@ -1,4 +1,4 @@
-import type { AgentEventEnvelope } from './protocol'
+import { isRecord, type AgentEventEnvelope } from './protocol'
 import { isTruncatedPayload, payloadString, safeDisplayText } from './events'
 
 /**
@@ -64,8 +64,14 @@ function toolName(event: AgentEventEnvelope): string {
 }
 
 function toolResultText(event: AgentEventEnvelope): string {
-  const status = payloadString(event.payload, 'status') ?? '结果状态未知'
-  const text = firstText(event, ['text'])
+  const nested = isRecord(event.payload.result)
+    ? event.payload.result
+    : isRecord(event.payload.tool_result)
+      ? event.payload.tool_result
+      : event.payload
+  const status = payloadString(nested, 'status') ?? '结果状态未知'
+  const rawText = payloadString(nested, 'text')
+  const text = rawText === null ? null : safeDisplayText(rawText, MAX_TIMELINE_TEXT)
   return text === null ? `工具结果：${status}` : `工具结果：${status} · ${text}`
 }
 
@@ -95,7 +101,7 @@ function itemFor(event: AgentEventEnvelope): TimelineItem {
     case 'turn_end':
       kind = 'end'
       title = 'Turn 结束'
-      text = preview ?? stateText(event)
+      text = preview ?? firstText(event, ['assistant_text']) ?? stateText(event)
       break
     case 'error':
       kind = 'error'

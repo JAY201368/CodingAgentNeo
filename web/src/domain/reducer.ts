@@ -583,7 +583,7 @@ export function commandGateFor(state: SessionState): CommandGate {
       canRespondToApproval: false,
       canInterrupt: state.commandInFlight === null,
       canClose: true,
-      reason: '重新连接得到的 RUNNING 状态可能仍有未完成 turn；在收到 turn_end 或 session_end 前不能提交新任务。可使用 Stop 或结束 Session。',
+      reason: '重新连接得到的 RUNNING 状态可能仍有未完成 turn；在收到 turn_end 或 session_end 前不能提交新任务。需要时可结束 Session。',
     }
   }
   if (state.turnActive) {

@@ -87,3 +87,10 @@
 - 选择：`coding-agent-neo-web` 默认读取源码检出的 `web/dist`，也接受 `--dist-dir PATH`；Python wheel 只包含 Python 包和入口，不夹带 `node_modules`、coverage 或 Vite 生成物。
 - 理由与替代：Node 构建依赖和产物具有独立生命周期，且 `web/dist` 被忽略、不可在未构建时可靠地成为 Python 包数据；要求显式构建或传入目录能在启动前安全失败，同时保留离线/安装包使用外部构建物的能力。
 - 后果：发布 Web 演示前必须先执行 `npm --prefix web run build`，或向 launcher 传入已构建的 `--dist-dir`；通用 `transports/http/` 和独立 `coding-agent-neo-http` 仍不定位任何静态资源。
+
+## 2026-09-01 — Web UI 收敛为整页对话流
+
+- 选择：当前 Web 采用浏览器页面滚动的整页消息流，固定底部高层 composer；用户消息始终在右侧，`turn_end` 最终回复在左侧，其余事件按 turn 默认折叠为“展开思考过程”。sequence 编号仅在展开对应 turn 时显示。所有动态错误、重连、授权、诊断及 Session 入口统一追加到消息尾部。
+- 理由与替代：内部 timeline 滚动区会显著压缩可读范围，顶部插入运行卡或工具结果大卡会打断消息顺序，独立最终回复与 Session 生命周期卡也重复表达 canonical 消息事实。按 turn 收敛既保留用户输入和最终回答的主要对话结构，又允许按需查看完整事件过程。
+- 控制布局：composer 只在文本框右下角提供圆形上箭头，运行时原位变灰并禁用；不显示 Stop/取消控件。标题栏右侧只保留“结束 Session”，不显示连接/运行徽章。显式结束成功后追加单行“当前 Session 已结束 / 新建 session”并自动滚动到它；仍有恢复线索时才显示“当前 Session 连接已中断 / 重新连接”。
+- 后果：独立“事件时间线”标题、最终回复卡、Session 生命周期卡、工具生命周期卡、运行 Stop 卡及顶部状态徽章不再是当前产品界面。`Interrupt` command 与 approval fail-closed 等底层契约并未删除；本决定只改变 Web 控件暴露和事件投影。T05–T08 的旧完成摘要与视觉记录保留为历史证据，并由本决定 supersede 其展示形态。

@@ -107,11 +107,43 @@ describe('App', () => {
 
     expect(scripted.commandCalls).toHaveBeenCalledTimes(1)
     expect(scripted.commandCalls.mock.calls[0][0]).toBe('{"type":"SubmitTask","text":"inspect"}')
+    expect(wrapper.text()).toContain('canonical answer')
+    expect(wrapper.text()).not.toContain('事件时间线')
+    expect(wrapper.text()).toContain('inspect')
+    expect(wrapper.text()).not.toContain('Assistant 回复')
+    expect(wrapper.get('.timeline__process-toggle').text()).toContain('展开思考过程')
+    expect(wrapper.findAll('.timeline__sequence')).toHaveLength(0)
+
+    await wrapper.get('.timeline__process-toggle').trigger('click')
     expect(wrapper.text()).toContain('用户任务')
     expect(wrapper.text()).toContain('Assistant 回复')
-    expect(wrapper.text()).toContain('canonical answer')
-    expect(wrapper.text()).toContain('本轮已完成')
+    expect(wrapper.findAll('.timeline__sequence').map((item) => item.text())).toEqual([
+      '#1', '#2', '#3',
+    ])
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
+    const conversation = wrapper.get('.conversation-workspace')
+    const children = conversation.element.children
+    expect(children[0]?.classList.contains('timeline')).toBe(true)
+    expect(children[1]?.classList.contains('composer')).toBe(true)
+    expect(wrapper.find('.final-reply').exists()).toBe(false)
+    expect(wrapper.find('.session-controls').exists()).toBe(false)
+    expect(wrapper.get('.app-header__end-session').text()).toBe('结束 Session')
+    expect(wrapper.find('.composer .section-heading').exists()).toBe(false)
+    expect(wrapper.find('.composer__reason').exists()).toBe(false)
+    expect(wrapper.find('.connection-status').exists()).toBe(false)
+    expect(wrapper.find('.runtime-status').exists()).toBe(false)
+
+    await wrapper.get('.app-header__end-session').trigger('click')
+    await flushPromises()
+    const sessionEntry = wrapper.get('.connection-card--session-entry')
+    expect(sessionEntry.get('.connection-card__message').text()).toBe('当前 Session 已结束')
+    expect(sessionEntry.get('button').text()).toBe('新建 session')
+    const messageTail = wrapper.get('.message-tail')
+    expect(messageTail.element.contains(sessionEntry.element)).toBe(true)
+    const shellChildren = [...wrapper.get('.app-shell').element.children]
+    expect(shellChildren.indexOf(messageTail.element)).toBeGreaterThan(
+      shellChildren.indexOf(conversation.element),
+    )
 
     wrapper.unmount()
   })
@@ -170,11 +202,12 @@ describe('App', () => {
 
     expect(wrapper.get('[role="alert"]').text()).toContain('session 已关闭或不存在')
     expect(wrapper.get('[role="alert"]').text()).not.toContain('private backend detail')
-    expect(wrapper.text()).toContain('重新连接')
+    expect(wrapper.get('.message-tail').element.contains(wrapper.get('[role="alert"]').element)).toBe(true)
+    expect(wrapper.text()).toContain('新建 session')
     wrapper.unmount()
   })
 
-  it('renders one aggregated tool card and sends one approval response', async () => {
+  it('keeps tool events in the folded thought process and sends one approval response', async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
     const queuedFrames: string[] = []
     const commandCalls: string[] = []
@@ -244,6 +277,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    expect(wrapper.get('.message-tail').element.contains(wrapper.get('[role="dialog"]').element)).toBe(true)
     expect(wrapper.text()).toContain('safe redacted summary')
     expect(wrapper.text()).not.toContain('not rendered')
     await wrapper.get('[role="dialog"] .primary-action').trigger('click')
@@ -272,15 +306,16 @@ describe('App', () => {
       },
     ])
     await flushPromises()
-    expect(wrapper.findAll('.tool-card')).toHaveLength(1)
-    expect(wrapper.text()).toContain('成功（success）')
-    expect(wrapper.text()).toContain('0.250 秒')
-    expect(wrapper.text()).toContain('退出码')
+    expect(wrapper.find('.tool-lifecycles').exists()).toBe(false)
+    expect(wrapper.find('.tool-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('safe result')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    await wrapper.get('.timeline__process-toggle').trigger('click')
+    expect(wrapper.text()).toContain('工具结果：success · safe result')
     wrapper.unmount()
   })
 
-  it('sends Stop once and locks the composer after INTERRUPTED', async () => {
+  it('keeps the arrow send button disabled while a turn is running', async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
     const commandCalls: string[] = []
     const encoder = new TextEncoder()
@@ -325,19 +360,16 @@ describe('App', () => {
     push(event(1, 'user_message', { text: 'interrupt me' }))
     await flushPromises()
 
-    const stop = wrapper.get('.stop-action')
-    await stop.trigger('click')
-    await flushPromises()
-    await stop.trigger('click')
-    expect(commandCalls).toEqual([
-      '{"type":"SubmitTask","text":"interrupt me"}',
-      '{"type":"Interrupt","reason":"user_cancelled"}',
-    ])
-    expect((stop.element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.find('.run-controls').exists()).toBe(false)
+    expect(wrapper.find('.cancel-action').exists()).toBe(false)
+    const send = wrapper.get('.composer__send')
+    expect(send.attributes('aria-label')).toBe('发送任务')
+    expect((send.element as HTMLButtonElement).disabled).toBe(true)
+    expect(commandCalls).toEqual(['{"type":"SubmitTask","text":"interrupt me"}'])
 
     push(event(2, 'turn_end', { state: 'INTERRUPTED', reason: 'user_cancelled', assistant_text: '' }))
     await flushPromises()
-    expect(wrapper.text()).toContain('已中断')
+    expect(wrapper.text()).toContain('INTERRUPTED')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(true)
     wrapper.unmount()
   })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
   AgentApiError,
@@ -7,13 +7,10 @@ import {
   AgentRequestAbortedError,
 } from './api/client'
 import { useAgentSession, SessionCommandError } from './composables/useAgentSession'
-import BoundedText from './components/BoundedText.vue'
 import ApprovalDialog from './components/ApprovalDialog.vue'
 import TaskComposer from './components/TaskComposer.vue'
 import Timeline from './components/Timeline.vue'
-import ToolCard from './components/ToolCard.vue'
 import { projectTimeline } from './domain/timeline'
-import { projectToolLifecycles } from './domain/tools'
 
 const props = withDefaults(defineProps<{
   readonly client?: import('./api/client').AgentHttpClient
@@ -30,13 +27,13 @@ const session = useAgentSession({
   storage: props.storage,
 })
 const composer = ref<InstanceType<typeof TaskComposer> | null>(null)
+const sessionEntry = ref<globalThis.HTMLElement | null>(null)
 const actionError = ref<string | null>(null)
 const connecting = ref(false)
 const endingSession = ref(false)
 let connectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 
 const timelineItems = computed(() => projectTimeline(session.state.value.events))
-const toolLifecycles = computed(() => projectToolLifecycles(session.state.value.events))
 const pendingApproval = computed(() => session.state.value.pendingApproval)
 const isConnected = computed(() =>
   session.state.value.connection === 'connected' && session.transportSessionId.value !== null,
@@ -54,86 +51,11 @@ const showStreamRetry = computed(() =>
   isConnected.value && !session.state.value.streamAvailable && streamRetryExhausted.value,
 )
 const showEndSession = computed(() =>
-  isConnected.value && session.gate.value.canClose && !endingSession.value,
+  isConnected.value && session.gate.value.canClose,
 )
-const finalReply = computed(() =>
-  session.state.value.finalAssistantText || session.state.value.latestAssistantText,
-)
-const finalReplySource = computed(() =>
-  session.state.value.finalAssistantText ? '来自最近一次 turn_end' : '来自最近一次 assistant 回复',
-)
-
-const statusLabels: Record<string, string> = {
-  RUNNING: '运行中',
-  WAITING_FOR_APPROVAL: '等待授权',
-  COMPLETED_TURN: '本轮已完成',
-  LIMIT_REACHED: '已达到限制',
-  INTERRUPTED: '已中断',
-  FAILED: '执行失败',
-}
-
-const statusMarks: Record<string, string> = {
-  RUNNING: '◌',
-  WAITING_FOR_APPROVAL: '⌁',
-  COMPLETED_TURN: '✓',
-  LIMIT_REACHED: '!',
-  INTERRUPTED: '×',
-  FAILED: '!',
-}
-
-const connectionLabels: Record<string, string> = {
-  disconnected: '尚未连接 Agent 服务',
-  connecting: '正在连接 Agent 服务…',
-  connected: '已连接 Agent 服务',
-  closed: 'Session 已关闭',
-  error: 'Agent 服务暂时不可用',
-}
-
-const connectionMarks: Record<string, string> = {
-  disconnected: '○',
-  connecting: '◌',
-  connected: '●',
-  closed: '×',
-  error: '!',
-}
-
-const statusLabel = computed(() => statusLabels[session.state.value.status] ?? '状态未知')
-const statusMark = computed(() => statusMarks[session.state.value.status] ?? '?')
-const connectionMark = computed(() => connectionMarks[session.state.value.connection] ?? '?')
-const connectionLabel = computed(() => {
-  if (isConnected.value && !session.state.value.streamAvailable) {
-    return streamRetryExhausted.value ? '事件流已断开' : '事件流连接中…'
-  }
-  return connectionLabels[session.state.value.connection] ?? '连接状态未知'
-})
-const composerReason = computed(() => {
-  const gate = session.gate.value
-  if (gate.kind === 'completed_turn') {
-    return '上一轮已完成，可以继续输入 follow-up。'
-  }
-  if (gate.kind === 'waiting_for_approval') {
-    return gate.reason
-  }
-  if (gate.kind === 'terminal') {
-    return `Session ${statusLabel.value}，不能继续提交任务。`
-  }
-  if (gate.kind === 'turn_running' || gate.kind === 'command_pending') {
-    return gate.reason
-  }
-  if (!isConnected.value) {
-    return '连接成功后可以提交任务。'
-  }
-  return ''
-})
 const hasDiagnostics = computed(() => session.state.value.diagnostics.length > 0)
 const displayError = computed(() => actionError.value ?? session.state.value.lastError)
 const approvalSubmitting = computed(() => session.state.value.commandInFlight === 'ApprovalResponse')
-const interruptSubmitting = computed(() => session.state.value.commandInFlight === 'Interrupt')
-const showStop = computed(() =>
-  isConnected.value &&
-  session.state.value.turnActive &&
-  (session.state.value.status === 'RUNNING' || session.state.value.status === 'WAITING_FOR_APPROVAL'),
-)
 
 function safeErrorMessage(error: unknown): string {
   if (error instanceof AgentApiError) {
@@ -240,18 +162,6 @@ async function respondToApproval(requestId: string, approved: boolean): Promise<
   }
 }
 
-async function stopTurn(): Promise<void> {
-  actionError.value = null
-  try {
-    await session.interrupt()
-  } catch (error) {
-    handleFailure(error)
-    if (session.state.value.commandUncertain) {
-      actionError.value = `${safeErrorMessage(error)} 中断结果未知，页面不会自动重试。`
-    }
-  }
-}
-
 async function endSession(): Promise<void> {
   if (endingSession.value) {
     return
@@ -262,6 +172,13 @@ async function endSession(): Promise<void> {
     // DELETE is the explicit transport lifecycle operation.  It is never
     // attached to component teardown, so browser teardown is not close evidence.
     await session.deleteSession()
+    await nextTick()
+    if (typeof sessionEntry.value?.scrollIntoView === 'function') {
+      sessionEntry.value.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    } else {
+      const root = globalThis.document.scrollingElement ?? globalThis.document.documentElement
+      root.scrollTop = root.scrollHeight
+    }
   } catch (error) {
     handleFailure(error)
   } finally {
@@ -303,109 +220,50 @@ onBeforeUnmount(() => {
         <h1 id="app-title">
           CodingAgentNeo Web
         </h1>
-        <p class="app-header__subtitle">
-          用一个线性 session 完成任务，并保留每条运行事实。
-        </p>
       </div>
-      <div class="status-stack">
-        <p
-          class="connection-status"
-          role="status"
-          aria-live="polite"
+      <div
+        v-if="showEndSession"
+        class="app-header__actions"
+      >
+        <button
+          class="secondary-action app-header__end-session"
+          type="button"
+          :disabled="endingSession"
+          @click="endSession"
         >
-          <span
-            class="status-mark"
-            aria-hidden="true"
-          >{{ connectionMark }}</span>
-          <span>{{ connectionLabel }}</span>
-        </p>
-        <p
-          v-if="isConnected"
-          class="runtime-status"
-          :data-state="session.state.value.status"
-          role="status"
-          aria-live="polite"
-        >
-          <span
-            class="status-mark"
-            aria-hidden="true"
-          >{{ statusMark }}</span>
-          <span>{{ statusLabel }}</span>
-        </p>
+          {{ endingSession ? '正在结束…' : '结束 Session' }}
+        </button>
       </div>
     </header>
 
-    <section
-      v-if="displayError"
-      class="alert"
-      role="alert"
-      aria-live="assertive"
-    >
-      <span
-        class="alert__mark"
-        aria-hidden="true"
-      >!</span>
-      <span>{{ displayError }}</span>
-    </section>
-
-    <section
-      v-if="canRetryConnection"
-      class="connection-card"
-      aria-labelledby="connection-title"
-    >
-      <h2 id="connection-title">
-        {{ hasResumeHint ? '正在恢复已有 session' : '需要新建 session' }}
-      </h2>
-      <p>
-        <template v-if="hasResumeHint">
-          页面会先查询本地保存的 transport ID，再从最后成功游标重新订阅；不会声称恢复已重启进程中的历史 session。
-        </template>
-        <template v-else>
-          可以确认 Agent HTTP 服务已在本机运行后创建一个新的 session。页面不会重放此前未确认的 POST 命令。
-        </template>
-      </p>
-      <button
-        class="secondary-action"
-        type="button"
-        :disabled="connecting"
-        @click="retryConnection"
-      >
-        {{ connecting ? '连接中…' : '重新连接' }}
-      </button>
-    </section>
-
     <template v-if="showWorkspace">
-      <TaskComposer
-        ref="composer"
-        :disabled="!session.gate.value.canSubmitTask"
-        :pending="session.state.value.commandInFlight === 'SubmitTask'"
-        :status-reason="composerReason"
-        @submit="submitTask"
-      />
+      <div class="conversation-workspace">
+        <Timeline :items="timelineItems" />
 
+        <TaskComposer
+          ref="composer"
+          :disabled="!session.gate.value.canSubmitTask"
+          :pending="session.state.value.commandInFlight === 'SubmitTask'"
+          @submit="submitTask"
+        />
+      </div>
+    </template>
+
+    <div
+      v-if="displayError || showStreamRetry || pendingApproval !== null || hasDiagnostics || canRetryConnection"
+      class="message-tail"
+    >
       <section
-        v-if="showStop"
-        class="run-controls"
-        aria-labelledby="run-controls-title"
-        aria-live="polite"
-        :aria-busy="interruptSubmitting"
+        v-if="displayError"
+        class="alert"
+        role="alert"
+        aria-live="assertive"
       >
-        <div>
-          <h2 id="run-controls-title">
-            当前 turn
-          </h2>
-          <p>
-            {{ interruptSubmitting ? '中断请求已发送，等待 INTERRUPTED 结束事件。' : '任务正在运行；可主动停止。' }}
-          </p>
-        </div>
-        <button
-          class="stop-action"
-          type="button"
-          :disabled="!session.gate.value.canInterrupt || interruptSubmitting"
-          @click="stopTurn"
-        >
-          {{ interruptSubmitting ? '正在停止…' : '停止（Stop）' }}
-        </button>
+        <span
+          class="alert__mark"
+          aria-hidden="true"
+        >!</span>
+        <span>{{ displayError }}</span>
       </section>
 
       <section
@@ -436,66 +294,6 @@ onBeforeUnmount(() => {
         @decide="respondToApproval"
       />
 
-      <section
-        v-if="toolLifecycles.length > 0"
-        class="tool-lifecycles"
-        aria-labelledby="tool-lifecycles-title"
-      >
-        <div class="section-heading">
-          <h2 id="tool-lifecycles-title">
-            工具执行
-          </h2>
-          <span class="section-heading__hint">按 correlation ID 聚合</span>
-        </div>
-        <div class="tool-lifecycles__list">
-          <ToolCard
-            v-for="item in toolLifecycles"
-            :key="item.correlationId"
-            :item="item"
-          />
-        </div>
-      </section>
-
-      <section
-        v-if="finalReply"
-        class="final-reply"
-        aria-labelledby="final-reply-title"
-      >
-        <div class="section-heading">
-          <h2 id="final-reply-title">
-            最终回复
-          </h2>
-          <span class="section-heading__hint">{{ finalReplySource }}</span>
-        </div>
-        <BoundedText
-          :value="finalReply"
-          label="最终回复"
-        />
-      </section>
-
-      <Timeline :items="timelineItems" />
-
-      <section
-        v-if="showEndSession"
-        class="session-controls"
-        aria-labelledby="session-controls-title"
-      >
-        <div>
-          <h2 id="session-controls-title">
-            Session 生命周期
-          </h2>
-          <p>需要结束时显式关闭；浏览器离开页面不会自动发送关闭命令。</p>
-        </div>
-        <button
-          class="secondary-action"
-          type="button"
-          :disabled="endingSession"
-          @click="endSession"
-        >
-          {{ endingSession ? '正在结束…' : '结束 Session' }}
-        </button>
-      </section>
-
       <p
         v-if="hasDiagnostics"
         class="diagnostic-note"
@@ -504,10 +302,29 @@ onBeforeUnmount(() => {
       >
         部分事件字段未知或不可用，已按安全文本降级展示（{{ session.state.value.diagnostics.length }} 条诊断）。
       </p>
-    </template>
+
+      <section
+        v-if="canRetryConnection"
+        ref="sessionEntry"
+        class="connection-card connection-card--session-entry"
+        aria-label="Session 连接入口"
+      >
+        <p class="connection-card__message">
+          {{ hasResumeHint ? '当前 Session 连接已中断' : '当前 Session 已结束' }}
+        </p>
+        <button
+          class="secondary-action"
+          type="button"
+          :disabled="connecting"
+          @click="retryConnection"
+        >
+          {{ connecting ? '创建中…' : (hasResumeHint ? '重新连接' : '新建 session') }}
+        </button>
+      </section>
+    </div>
 
     <p
-      v-else-if="!canRetryConnection && !connecting"
+      v-if="!showWorkspace && !canRetryConnection && !connecting"
       class="loading-note"
       role="status"
       aria-live="polite"
@@ -519,7 +336,7 @@ onBeforeUnmount(() => {
       <span>尚未连接 Agent 服务</span>
     </p>
     <p
-      v-else-if="connecting"
+      v-else-if="!showWorkspace && connecting"
       class="loading-note"
       role="status"
       aria-live="polite"
