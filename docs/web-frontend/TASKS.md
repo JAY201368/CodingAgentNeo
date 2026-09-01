@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：T01～T03 已验收；T04～T10 待串行实施
+> 状态：T01～T04 已验收；T05～T10 待串行实施
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -88,7 +88,7 @@ flowchart TD
 
 **完成摘要（2026-09-01）:** 已建立独立 `web/` Vue 3 + Vite + strict TypeScript 工程、npm lockfile、Vitest/Vue Test Utils、ESLint、类型检查与生产构建命令，并提供明确未连接 Agent 的可独立启动占位页；未实现 fetch/SSE、业务 UI 或最终视觉。主 Agent 在 Node v24.3.0/npm 11.4.2 下复核：`npm ci`、lint、type-check、test（1 passed）、build、Vite 回环启动与 curl 页面探针、依赖/范围扫描及 `git diff --check` 均通过，`node_modules`/`dist`/coverage 均被忽略。额外 `npm audit --omit=dev` 因当前华为云 npm 镜像 audit 端点返回 405 而未形成审计证据；安装仅有第三方开发工具弃用提示，未执行 Agent HTTP/SSE、真实模型或真实浏览器交互。
 
-### [ ] T04 — 交付 Agent HTTP 浏览器客户端与 session 状态核
+### [x] T04 — 交付 Agent HTTP 浏览器客户端与 session 状态核
 
 **依赖:** T02, T03
 **范围:** 仅参考 `docs/agent-transport-interface.md` 第 4 节，在 `web/src/api/`、`web/src/domain/` 和 `web/src/composables/` 实现 Agent wire client、防御性 envelope parser/纯 reducer、session/游标/命令互斥；对真实 HTTP adapter 做契约集成。Web 不直接参考或投影 `docs/agent-backend-interface.md` 的 Python Port。排除完整 timeline、approval dialog、静态托管和最终布局。
@@ -103,6 +103,8 @@ flowchart TD
 - 浏览器 client contract tests 与 T02 HTTP 测试使用同一 fixture/schema 样例，避免两份协议漂移。
 
 **验证:** `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test -- src/api src/domain src/composables`; `npm --prefix web run build`; `.venv/bin/python -m pytest tests/transports/test_http_transport.py`。
+
+**完成摘要（2026-09-01）:** 已交付严格按 v1 binding 映射的浏览器 HTTP/SSE client、防御性 envelope parser、纯 session reducer、命令互斥和只持久化 transport ID/cursor 的 composable；POST 不自动重放，重复 sequence 幂等，跳号保留游标并请求重订阅，未知/缺失/截断 payload 安全降级。主审发现并退回修正 Interrupt/CloseSession 可选 reason 校验缺陷后，四种 canonical command、可选 reason 与非法字段均有回归测试；浏览器与 Python HTTP 测试共享同一 wire fixture。主 Agent 复核：定向 Web 18 passed、Web 全量 19 passed、lint/type-check/build、HTTP adapter 11 passed、Ruff 与 `git diff --check` 均通过；仅有 Starlette 第三方弃用警告，未执行真实模型、真实浏览器或公网部署，刷新重连退避留待 T07。
 
 ## 阶段 C：Web 核心用户旅程
 

@@ -1,0 +1,92 @@
+{
+  "health": {
+    "status": "ok",
+    "protocol_version": 1
+  },
+  "session": {
+    "transport_session_id": "transport_fixture_1",
+    "state": "RUNNING",
+    "cursor": 0,
+    "closed": false
+  },
+  "commands": [
+    { "type": "SubmitTask", "text": "inspect" },
+    { "type": "ApprovalResponse", "request_id": "correlation_fixture_1", "approved": false },
+    { "type": "Interrupt", "reason": "user_cancelled" },
+    { "type": "CloseSession", "reason": "frontend_exit" }
+  ],
+  "events": [
+    {
+      "schema_version": 1,
+      "session_id": "session_fixture_1",
+      "event_id": "event_fixture_1",
+      "agent_id": "agent_fixture_1",
+      "parent_agent_id": null,
+      "sequence": 1,
+      "type": "session_start",
+      "correlation_id": null,
+      "provider_tool_call_id": null,
+      "timestamp": "2026-08-31T08:00:00.123456Z",
+      "payload": { "state": "RUNNING" }
+    },
+    {
+      "schema_version": 1,
+      "session_id": "session_fixture_1",
+      "event_id": "event_fixture_2",
+      "agent_id": "agent_fixture_1",
+      "parent_agent_id": null,
+      "sequence": 2,
+      "type": "assistant_message",
+      "correlation_id": null,
+      "provider_tool_call_id": null,
+      "timestamp": "2026-08-31T08:00:00.223456Z",
+      "payload": {
+        "text": "done",
+        "new_field": { "preserve": true }
+      }
+    },
+    {
+      "schema_version": 1,
+      "session_id": "session_fixture_1",
+      "event_id": "event_fixture_3",
+      "agent_id": "agent_fixture_1",
+      "parent_agent_id": null,
+      "sequence": 3,
+      "type": "unknown_future_event",
+      "correlation_id": null,
+      "provider_tool_call_id": null,
+      "timestamp": "2026-08-31T08:00:00.323456Z",
+      "payload": { "new_field": { "preserve": true } }
+    },
+    {
+      "schema_version": 1,
+      "session_id": "session_fixture_1",
+      "event_id": "event_fixture_4",
+      "agent_id": "agent_fixture_1",
+      "parent_agent_id": null,
+      "sequence": 4,
+      "type": "turn_end",
+      "correlation_id": null,
+      "provider_tool_call_id": null,
+      "timestamp": "2026-08-31T08:00:00.423456Z",
+      "payload": {
+        "state": "COMPLETED_TURN",
+        "reason": "complete",
+        "assistant_text": "done",
+        "budget": {}
+      }
+    }
+  ],
+  "errors": [
+    {
+      "status": 409,
+      "code": "turn_in_progress",
+      "message": "a turn is already running"
+    },
+    {
+      "status": 410,
+      "code": "session_closed",
+      "message": "transport session is closed"
+    }
+  ]
+}

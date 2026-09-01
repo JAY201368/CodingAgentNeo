@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -29,14 +30,31 @@ from coding_agent_neo.models import EventEnvelope, NormalizedAssistantResponse, 
 from coding_agent_neo.transports.http import create_app
 from coding_agent_neo.transports.http.app import _event_stream
 
+_WIRE_FIXTURE = json.loads(
+    (
+        Path(__file__).parents[2] / "web" / "src" / "domain" / "fixtures" / "transport-v1.json"
+    ).read_text(encoding="utf-8")
+)
+
 
 def _event(sequence: int, event_type: str = "assistant_message") -> EventEnvelope:
-    return EventEnvelope.create(
+    """Build fake canonical events from the browser contract fixture."""
+
+    template = next(item for item in _WIRE_FIXTURE["events"] if item["type"] == event_type)
+    payload = dict(template["payload"])
+    payload["text"] = f"message-{sequence}"
+    return EventEnvelope(
+        schema_version=template["schema_version"],
         session_id="session_fake",
+        event_id=f"event_fake_{sequence}",
         agent_id="agent_fake",
+        parent_agent_id=template["parent_agent_id"],
         sequence=sequence,
-        type=event_type,
-        payload={"text": f"message-{sequence}", "new_field": {"preserve": True}},
+        type=template["type"],
+        correlation_id=template["correlation_id"],
+        provider_tool_call_id=template["provider_tool_call_id"],
+        timestamp=template["timestamp"],
+        payload=payload,
     )
 
 
