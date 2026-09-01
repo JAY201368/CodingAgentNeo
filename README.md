@@ -45,6 +45,25 @@ python -m pip install -e ".[dev,http]"
 coding-agent-neo-http --config .coding-agent-neo.toml
 ```
 
+The independent Web package currently provides a local, disconnected placeholder page. It does not need Python, an API key, or an Agent service:
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+Run its quality gates and production build with:
+
+```bash
+npm --prefix web run lint
+npm --prefix web run type-check
+npm --prefix web run test
+npm --prefix web run build
+```
+
+The Web package targets Node.js 20+ and npm 10+. Stop the Vite development server with Ctrl+C. Agent HTTP/SSE connectivity and product interactions are planned for later Web tasks.
+
 The [Agent adapter interface specification](docs/agent-transport-interface.md) is the sole
 authority for its binding, wire, event, error, security, configuration, and lifecycle contract;
 the README is not a supplementary specification.

@@ -1,6 +1,6 @@
 # CodingAgentNeo 前端接入与 Web 前端任务分解
 
-> 状态：已按用户架构澄清重构，全部实现任务待审阅
+> 状态：T01～T03 已验收；T04～T10 待串行实施
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > Agent 后端契约：[../agent-backend-interface.md](../agent-backend-interface.md)
 > Agent 适配层契约：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -72,7 +72,7 @@ flowchart TD
 
 ## 阶段 B：独立 Web Client 基础
 
-### [ ] T03 — 建立 Vite + Vue Web 工程与质量门
+### [x] T03 — 建立 Vite + Vue Web 工程与质量门
 
 **依赖:** 无
 **范围:** 创建根目录 `web/`，建立 Vue 3 + Vite + TypeScript 单页工程、npm lockfile、Vitest/Vue Test Utils、ESLint、type-check/build 命令和诚实的未连接占位页；更新忽略和开发说明。排除 Agent HTTP 实现、协议客户端、业务 UI 和最终视觉。
@@ -85,6 +85,8 @@ flowchart TD
 - `AGENTS.md` 的 Web 标准命令经实测后才标为已建立。
 
 **验证:** `npm --prefix web ci`; `npm --prefix web run lint`; `npm --prefix web run type-check`; `npm --prefix web run test`; `npm --prefix web run build`; `git diff --check`。
+
+**完成摘要（2026-09-01）:** 已建立独立 `web/` Vue 3 + Vite + strict TypeScript 工程、npm lockfile、Vitest/Vue Test Utils、ESLint、类型检查与生产构建命令，并提供明确未连接 Agent 的可独立启动占位页；未实现 fetch/SSE、业务 UI 或最终视觉。主 Agent 在 Node v24.3.0/npm 11.4.2 下复核：`npm ci`、lint、type-check、test（1 passed）、build、Vite 回环启动与 curl 页面探针、依赖/范围扫描及 `git diff --check` 均通过，`node_modules`/`dist`/coverage 均被忽略。额外 `npm audit --omit=dev` 因当前华为云 npm 镜像 audit 端点返回 405 而未形成审计证据；安装仅有第三方开发工具弃用提示，未执行 Agent HTTP/SSE、真实模型或真实浏览器交互。
 
 ### [ ] T04 — 交付 Agent HTTP 浏览器客户端与 session 状态核
 

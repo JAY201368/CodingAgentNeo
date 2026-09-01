@@ -26,12 +26,12 @@
 | `.venv/bin/python -m pip install -e ".[dev,http]"` | HTTP adapter 可选依赖 | T02 |
 | `.venv/bin/coding-agent-neo-http --help` | 独立 Agent HTTP 入口 | T02 |
 | `.venv/bin/python -m pytest tests/transports` | adapter/conformance 测试 | T01/T02 |
-| `npm --prefix web ci` | 按 lockfile 安装 Web 依赖 | T03 |
-| `npm --prefix web run dev` | Vite 开发服务 | T03 |
-| `npm --prefix web run lint` | Web lint，不改写 | T03 |
-| `npm --prefix web run type-check` | Vue/TypeScript 类型检查 | T03 |
-| `npm --prefix web run test` | Web Vitest | T03 |
-| `npm --prefix web run build` | 生成 `web/dist` | T03 |
+| `npm --prefix web ci` | 按 lockfile 安装 Web 依赖 | T03 已建立（2026-09-01 实测） |
+| `npm --prefix web run dev` | Vite 开发服务 | T03 已建立（2026-09-01 实测） |
+| `npm --prefix web run lint` | Web lint，不改写 | T03 已建立（2026-09-01 实测） |
+| `npm --prefix web run type-check` | Vue/TypeScript 类型检查 | T03 已建立（2026-09-01 实测） |
+| `npm --prefix web run test` | Web Vitest | T03 已建立（2026-09-01 实测） |
+| `npm --prefix web run build` | 生成 `web/dist` | T03 已建立（2026-09-01 实测） |
 | `.venv/bin/coding-agent-neo-web --help` | Web composition launcher | T09 |
 | `.venv/bin/python -m pytest tests/acceptance -m acceptance` | baseline 聚合验收 | baseline 已建立，T10 必跑 |
 

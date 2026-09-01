@@ -16,6 +16,14 @@ __pycache__/
 coverage.xml
 htmlcov/
 
+# Web package dependencies, Vite output, and test coverage
+node_modules/
+web/node_modules/
+web/dist/
+coverage/
+web/coverage/
+web/.vite/
+
 # Build and packaging output
 build/
 dist/
