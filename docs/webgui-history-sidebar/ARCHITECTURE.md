@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏架构
 
-> 状态：0.2 执行中（T01–T08 已验收，T09–T11 未实施）
+> 状态：0.2 执行中（T01–T09 已验收，T10–T11 未实施）
 > 架构版本：0.2-draft
 > 日期：2026-09-02
 > 需求入口：[requirement.md](requirement.md)
@@ -239,6 +239,6 @@ REPLACING(*) ─failure→ IDLE_SELECTION 或 RECOVERABLE_ERROR
 
 ## 10. 变更控制
 
-架构 0.1 是 T01–T07 的已验收历史基线。0.2-draft 根据 2026-09-02 用户反馈 supersede 其中三项前端内部设计：挂载自动创建/attach、history `EVENT` 可直接控制新 live transport 生命周期、右侧显式 session 生命周期按钮。T08 已把 hydration/live 生命周期隔离与统一 replacement 写入 `web/` 状态核；App 仍是 0.1 挂载与右侧按钮行为，直到 T09。不得把 T09–T11 写成已实现。
+架构 0.1 是 T01–T07 的已验收历史基线。0.2-draft 根据 2026-09-02 用户反馈 supersede 其中三项前端内部设计：挂载自动创建/attach、history `EVENT` 可直接控制新 live transport 生命周期、右侧显式 session 生命周期按钮。T08 已把 hydration/live 生命周期隔离与统一 replacement 写入 `web/` 状态核；T09 已把首屏改为 idle，并把新建/resume 入口收进侧边栏。桌面仍依赖页面根滚动，直到 T10。不得把 T10–T11 写成已实现。
 
 若实现中发现需要改变 wire protocol、事件/状态/授权/游标、网络暴露、安全或部署边界，或需要后端新增历史/恢复能力，停止当前任务并回到 `docs/backend-history-discover/` 与 `docs/agent-transport-interface.md` 的跨工作流变更控制，先更新对应权威规范、本架构、任务与决策后再实现。Web 内部接口（§6.2）的细化不属于跨工作流变更，但须遵守本架构边界与不变量。

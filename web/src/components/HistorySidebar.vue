@@ -4,16 +4,20 @@ import { computed } from 'vue'
 import { safeDisplayText } from '../domain/events'
 import type { SessionHistoryItem } from '../domain/history'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   readonly items: readonly SessionHistoryItem[]
   readonly loading: boolean
   readonly error: { readonly code: string; readonly message: string } | null
   readonly hasMore: boolean
   readonly activeSessionId: string | null
   readonly switching: boolean
-}>()
+  readonly lifecycleBusy?: 'create' | 'resume' | null
+}>(), {
+  lifecycleBusy: null,
+})
 
 const emit = defineEmits<{
+  create: []
   select: [session_id: string]
   loadMore: []
   refresh: []
@@ -22,6 +26,10 @@ const emit = defineEmits<{
 const showInitialLoading = computed(() => props.loading && props.items.length === 0)
 const showEmpty = computed(() =>
   !props.loading && props.error === null && props.items.length === 0,
+)
+const busy = computed(() => props.switching || props.lifecycleBusy !== null)
+const busyStatus = computed(() =>
+  props.lifecycleBusy === 'create' ? '正在新建 session…' : '正在切换 session…',
 )
 
 function itemSummary(item: SessionHistoryItem): string {
@@ -50,7 +58,14 @@ function isActive(item: SessionHistoryItem): boolean {
 }
 
 function canSelect(item: SessionHistoryItem): boolean {
-  return item.resumable && !props.switching
+  return item.resumable && !busy.value
+}
+
+function createSession(): void {
+  if (busy.value) {
+    return
+  }
+  emit('create')
 }
 
 function selectItem(item: SessionHistoryItem): void {
@@ -61,7 +76,7 @@ function selectItem(item: SessionHistoryItem): void {
 }
 
 function loadMore(): void {
-  if (props.switching) {
+  if (busy.value) {
     return
   }
   emit('loadMore')
@@ -78,13 +93,24 @@ function refresh(): void {
     class="history-sidebar"
     aria-label="历史 session"
     tabindex="-1"
-    :aria-busy="loading || switching"
+    :aria-busy="loading || busy"
   >
-    <header
-      v-if="$slots.title"
-      class="history-sidebar__header"
-    >
-      <slot name="title" />
+    <header class="history-sidebar__header">
+      <div
+        v-if="$slots.title"
+        class="history-sidebar__heading"
+      >
+        <slot name="title" />
+      </div>
+      <button
+        class="history-sidebar__create"
+        type="button"
+        aria-label="新建 session"
+        :disabled="busy"
+        @click="createSession"
+      >
+        <span aria-hidden="true">+</span>
+      </button>
     </header>
 
     <div
@@ -113,12 +139,12 @@ function refresh(): void {
     </div>
 
     <p
-      v-if="switching"
+      v-if="busy"
       class="history-sidebar__status history-sidebar__switching"
       role="status"
       aria-live="polite"
     >
-      正在切换 session…
+      {{ busyStatus }}
     </p>
 
     <p
@@ -198,7 +224,7 @@ function refresh(): void {
       v-if="hasMore"
       class="secondary-action history-sidebar__load-more"
       type="button"
-      :disabled="switching"
+      :disabled="busy"
       aria-label="加载更多历史 session"
       @click="loadMore"
     >

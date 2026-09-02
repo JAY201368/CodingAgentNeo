@@ -43,6 +43,7 @@ function mountSidebar(
     hasMore: boolean
     activeSessionId: string | null
     switching: boolean
+    lifecycleBusy: 'create' | 'resume' | null
   }> = {},
   attachTo?: HTMLElement,
 ) {
@@ -298,5 +299,44 @@ describe('HistorySidebar', () => {
     expect(selectButton.textContent).toContain('请检查失败测试')
     expect(loadMore.getAttribute('aria-label')).toBe('加载更多历史 session')
     wrapper.unmount()
+  })
+
+  it('renders a keyboard-reachable circular create button with aria-label', async () => {
+    const wrapper = mountSidebar({}, document.body)
+    await nextTick()
+    const create = wrapper.get('.history-sidebar__create')
+    expect(create.attributes('aria-label')).toBe('新建 session')
+    expect(create.attributes('type')).toBe('button')
+    expect((create.element as HTMLButtonElement).disabled).toBe(false)
+    const button = create.element as HTMLButtonElement
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    wrapper.unmount()
+  })
+
+  it('emits create from the circular button', async () => {
+    const wrapper = mountSidebar()
+    await wrapper.get('[aria-label="新建 session"]').trigger('click')
+    expect(wrapper.emitted('create')).toEqual([[]])
+  })
+
+  it('disables the create button while switching and does not emit', async () => {
+    const wrapper = mountSidebar({ switching: true })
+    const create = wrapper.get('.history-sidebar__create')
+    expect((create.element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.get('[role="status"]').text()).toContain('正在切换 session')
+    await create.trigger('click')
+    expect(wrapper.emitted('create')).toBeUndefined()
+  })
+
+  it('shows a create-specific busy status and disables create', async () => {
+    const wrapper = mountSidebar({
+      switching: true,
+      lifecycleBusy: 'create',
+    })
+    expect((wrapper.get('.history-sidebar__create').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.get('[role="status"]').text()).toContain('正在新建 session')
+    await wrapper.get('.history-sidebar__create').trigger('click')
+    expect(wrapper.emitted('create')).toBeUndefined()
   })
 })

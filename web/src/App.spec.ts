@@ -1,7 +1,8 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentHttpClient } from './api/client'
+import { DEFAULT_STORAGE_KEY } from './composables/useAgentSession'
 import fixture from './domain/fixtures/transport-v1.json'
 import App from './App.vue'
 
@@ -31,12 +32,32 @@ function jsonResponse(value: unknown, status = 200): Response {
   })
 }
 
+function pathnameOf(path: string): string {
+  try {
+    return new URL(path, 'http://local.invalid').pathname
+  } catch {
+    return path.split('?')[0] ?? path
+  }
+}
+
 function isHistoryListPath(path: string): boolean {
   return path.includes('/session-history') && !path.includes('/events')
 }
 
 function isHistoryEventsPath(path: string): boolean {
   return path.includes('/session-history/') && path.includes('/events')
+}
+
+function isSessionCollectionPath(path: string): boolean {
+  return pathnameOf(path) === '/api/v1/sessions'
+}
+
+function isSessionStatusPath(path: string): boolean {
+  return /^\/api\/v1\/sessions\/[^/]+$/.test(pathnameOf(path))
+}
+
+function isLiveSsePath(path: string): boolean {
+  return /^\/api\/v1\/sessions\/[^/]+\/events$/.test(pathnameOf(path))
 }
 
 function event(sequence: number, type: string, payload: Record<string, unknown>): Record<string, unknown> {
@@ -57,6 +78,65 @@ function event(sequence: number, type: string, payload: Record<string, unknown>)
 
 function nextTask(): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, 0))
+}
+
+async function settle(): Promise<void> {
+  await nextTask()
+  await flushPromises()
+  await nextTask()
+  await flushPromises()
+}
+
+function createButton(wrapper: VueWrapper): ReturnType<VueWrapper['get']> {
+  return wrapper.get('.history-sidebar [aria-label="新建 session"]')
+}
+
+function expectNoMainLifecycleControls(wrapper: VueWrapper): void {
+  const labels = wrapper.findAll('.app-shell button').map((button) => {
+    const aria = button.attributes('aria-label') ?? ''
+    return `${button.text()} ${aria}`.trim()
+  })
+  expect(labels.some((label) => label.includes('结束 Session'))).toBe(false)
+  expect(labels.some((label) => label.includes('重新连接事件流'))).toBe(false)
+  expect(labels.some((label) => label.includes('重新连接'))).toBe(false)
+  expect(labels.some((label) => label.includes('新建 session'))).toBe(false)
+  expect(wrapper.find('.app-shell .app-header__end-session').exists()).toBe(false)
+  expect(wrapper.find('.app-shell .connection-card').exists()).toBe(false)
+  expect(wrapper.find('.app-shell .connection-card--session-entry').exists()).toBe(false)
+}
+
+class MemoryStorage implements Storage {
+  private readonly values = new Map<string, string>()
+
+  constructor(initial?: { readonly transportSessionId: string; readonly cursor: number }) {
+    if (initial !== undefined) {
+      this.values.set(DEFAULT_STORAGE_KEY, JSON.stringify(initial))
+    }
+  }
+
+  get length(): number {
+    return this.values.size
+  }
+
+  clear(): void {
+    this.values.clear()
+  }
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null
+  }
+
+  key(index: number): string | null {
+    return [...this.values.keys()][index] ?? null
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key)
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value)
+  }
 }
 
 function makeScriptedClient(options: {
@@ -126,17 +206,13 @@ function makeScriptedClient(options: {
   return { client: new AgentHttpClient({ fetchImpl }), commandCalls }
 }
 
-describe('App', () => {
-  it('renders an honest disconnected placeholder', () => {
-    const wrapper = mount(App)
+async function createEmptySession(wrapper: VueWrapper): Promise<void> {
+  await createButton(wrapper).trigger('click')
+  await settle()
+}
 
-    expect(wrapper.get('#app-title').text()).toBe('CodingAgentNeo Web')
-    expect(wrapper.get('.history-sidebar').element.contains(wrapper.get('#app-title').element)).toBe(true)
-    expect(wrapper.get('.app-shell').text()).toContain('尚未连接 Agent 服务')
-    expect(wrapper.find('.app-shell button').exists()).toBe(false)
-  })
-
-  it('creates a session, submits one task, and renders the ordered final timeline', async () => {
+describe('App conversation after explicit create', () => {
+  it('creates a session from the sidebar, submits one task, and renders the ordered final timeline', async () => {
     const scripted = makeScriptedClient({
       events: [
         event(1, 'user_message', { text: 'inspect' }),
@@ -145,8 +221,8 @@ describe('App', () => {
       ],
     })
     const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
+    await createEmptySession(wrapper)
 
     const input = wrapper.get('textarea')
     await input.setValue('inspect')
@@ -175,23 +251,11 @@ describe('App', () => {
     expect(children[1]?.classList.contains('composer')).toBe(true)
     expect(wrapper.find('.final-reply').exists()).toBe(false)
     expect(wrapper.find('.session-controls').exists()).toBe(false)
-    expect(wrapper.get('.app-header__end-session').text()).toBe('结束 Session')
+    expectNoMainLifecycleControls(wrapper)
     expect(wrapper.find('.composer .section-heading').exists()).toBe(false)
     expect(wrapper.find('.composer__reason').exists()).toBe(false)
     expect(wrapper.find('.connection-status').exists()).toBe(false)
     expect(wrapper.find('.runtime-status').exists()).toBe(false)
-
-    await wrapper.get('.app-header__end-session').trigger('click')
-    await flushPromises()
-    const sessionEntry = wrapper.get('.connection-card--session-entry')
-    expect(sessionEntry.get('.connection-card__message').text()).toBe('当前 Session 已结束')
-    expect(sessionEntry.get('button').text()).toBe('新建 session')
-    const messageTail = wrapper.get('.message-tail')
-    expect(messageTail.element.contains(sessionEntry.element)).toBe(true)
-    const shellChildren = [...wrapper.get('.app-shell').element.children]
-    expect(shellChildren.indexOf(messageTail.element)).toBeGreaterThan(
-      shellChildren.indexOf(conversation.element),
-    )
 
     wrapper.unmount()
   })
@@ -226,8 +290,8 @@ describe('App', () => {
     const client = new AgentHttpClient({ fetchImpl: pendingFetch })
 
     const wrapper = mount(App, { props: { client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
+    await createEmptySession(wrapper)
     await wrapper.get('textarea').setValue('inspect')
     const form = wrapper.get('form')
     void form.trigger('submit')
@@ -238,23 +302,25 @@ describe('App', () => {
     wrapper.unmount()
   })
 
-  it('shows a recoverable safe error for a closed session', async () => {
+  it('shows a recoverable safe error for a closed session without a main-area create button', async () => {
     const scripted = makeScriptedClient({
       commandResponse: new Response(JSON.stringify({
         error: { code: 'session_closed', message: 'private backend detail' },
       }), { status: 410 }),
     })
     const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
+    await createEmptySession(wrapper)
     await wrapper.get('textarea').setValue('inspect')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
     expect(wrapper.get('[role="alert"]').text()).toContain('session 已关闭或不存在')
+    expect(wrapper.get('[role="alert"]').text()).toContain('左侧侧边栏')
     expect(wrapper.get('[role="alert"]').text()).not.toContain('private backend detail')
     expect(wrapper.get('.message-tail').element.contains(wrapper.get('[role="alert"]').element)).toBe(true)
-    expect(wrapper.text()).toContain('新建 session')
+    expectNoMainLifecycleControls(wrapper)
+    expect(createButton(wrapper).attributes('aria-label')).toBe('新建 session')
     wrapper.unmount()
   })
 
@@ -308,8 +374,8 @@ describe('App', () => {
       }),
     })
     const wrapper = mount(App, { props: { client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
+    await createEmptySession(wrapper)
     await wrapper.get('textarea').setValue('confirm')
     await wrapper.get('form').trigger('submit')
     push([
@@ -410,8 +476,8 @@ describe('App', () => {
       }),
     })
     const wrapper = mount(App, { props: { client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
+    await createEmptySession(wrapper)
     await wrapper.get('textarea').setValue('interrupt me')
     await wrapper.get('form').trigger('submit')
     push(event(1, 'user_message', { text: 'interrupt me' }))
@@ -491,9 +557,29 @@ function historyHydrationPage(): Record<string, unknown> {
   }
 }
 
+function interruptedHydrationPage(): Record<string, unknown> {
+  const page = historyHydrationPage()
+  const events = [
+    ...(page.events as Record<string, unknown>[]),
+    {
+      ...fixture.events[3],
+      event_id: 'event_history_session_end',
+      sequence: 5,
+      type: 'session_end',
+      payload: { state: 'INTERRUPTED', reason: 'user_cancelled', budget: {} },
+    },
+  ]
+  return {
+    ...page,
+    events,
+  }
+}
+
 function makeHistoryAppClient(options: {
   readonly resumeResponse?: Response
   readonly holdDelete?: Promise<void>
+  readonly holdCreate?: Promise<void>
+  readonly historyEvents?: Record<string, unknown>
 } = {}): {
   readonly client: AgentHttpClient
   readonly calls: RecordedCall[]
@@ -521,13 +607,16 @@ function makeHistoryAppClient(options: {
       }
       return jsonResponse(fixture.history.list)
     }
-    if (path.endsWith('/sessions') && method === 'POST') {
+    if (isSessionCollectionPath(path) && method === 'POST') {
       const record = body !== null && typeof body === 'object' ? body as Record<string, unknown> : {}
       if (typeof record.resume_session_id === 'string') {
         if (options.resumeResponse !== undefined) {
           return options.resumeResponse
         }
         return jsonResponse(fixture.history.resume.response, 201)
+      }
+      if (options.holdCreate !== undefined) {
+        await options.holdCreate
       }
       return jsonResponse({
         transport_session_id: 'transport_app_live',
@@ -542,9 +631,9 @@ function makeHistoryAppClient(options: {
       return new Response(null, { status: 204 })
     }
     if (isHistoryEventsPath(path)) {
-      return jsonResponse(historyHydrationPage())
+      return jsonResponse(options.historyEvents ?? historyHydrationPage())
     }
-    if (path.includes('/events')) {
+    if (isLiveSsePath(path) || path.includes('/events')) {
       return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
     }
     if (path.endsWith('/commands')) {
@@ -557,36 +646,354 @@ function makeHistoryAppClient(options: {
 }
 
 function sessionPosts(calls: readonly RecordedCall[]): RecordedCall[] {
-  return calls.filter((call) => call.method === 'POST' && call.path.endsWith('/sessions'))
+  return calls.filter((call) => call.method === 'POST' && isSessionCollectionPath(call.path))
 }
 
-describe('App history sidebar wiring', () => {
+function isResumePost(call: RecordedCall): boolean {
+  const body = call.body
+  return call.method === 'POST' &&
+    isSessionCollectionPath(call.path) &&
+    typeof body === 'object' &&
+    body !== null &&
+    'resume_session_id' in body
+}
+
+function isCreatePost(call: RecordedCall): boolean {
+  return call.method === 'POST' &&
+    isSessionCollectionPath(call.path) &&
+    (call.body === null || (typeof call.body === 'object' && call.body !== null && !('resume_session_id' in call.body)))
+}
+
+function sessionStatusGets(calls: readonly RecordedCall[]): RecordedCall[] {
+  return calls.filter((call) => call.method === 'GET' && isSessionStatusPath(call.path))
+}
+
+function liveSseGets(calls: readonly RecordedCall[]): RecordedCall[] {
+  return calls.filter((call) => call.method === 'GET' && isLiveSsePath(call.path))
+}
+
+function deletes(calls: readonly RecordedCall[]): RecordedCall[] {
+  return calls.filter((call) => call.method === 'DELETE')
+}
+
+describe('App idle and sidebar lifecycle', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('places the title in the sidebar and keeps the conversation in a centered main column', async () => {
+  it('loads history on first mount with zero session side effects and a blank main pane', async () => {
     const scripted = makeHistoryAppClient()
     const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
+    await settle()
+
+    const listCalls = scripted.calls.filter((call) => call.method === 'GET' && isHistoryListPath(call.path))
+    expect(listCalls.length).toBeGreaterThan(0)
+    expect(sessionPosts(scripted.calls)).toHaveLength(0)
+    expect(sessionStatusGets(scripted.calls)).toHaveLength(0)
+    expect(liveSseGets(scripted.calls)).toHaveLength(0)
+    expect(deletes(scripted.calls)).toHaveLength(0)
+    expect(wrapper.find('.conversation-workspace').exists()).toBe(false)
+    expect(wrapper.find('.composer').exists()).toBe(false)
+    expect(wrapper.get('.app-shell').text()).not.toContain('尚未连接 Agent 服务')
+    expect(wrapper.get('.app-shell').text()).not.toContain('当前 Session 已结束')
+    expect(wrapper.get('.app-shell').text()).not.toContain('连接已中断')
+    expectNoMainLifecycleControls(wrapper)
+    expect(createButton(wrapper).attributes('aria-label')).toBe('新建 session')
+    wrapper.unmount()
+  })
+
+  it('does not attach a persisted transport hint on mount', async () => {
+    const scripted = makeHistoryAppClient()
+    const storage = new MemoryStorage({
+      transportSessionId: 'transport_persisted_hint',
+      cursor: 7,
+    })
+    const wrapper = mount(App, { props: { client: scripted.client, storage } })
+    await settle()
+
+    expect(sessionPosts(scripted.calls)).toHaveLength(0)
+    expect(sessionStatusGets(scripted.calls)).toHaveLength(0)
+    expect(liveSseGets(scripted.calls)).toHaveLength(0)
+    expect(deletes(scripted.calls)).toHaveLength(0)
+    expect(scripted.calls.some((call) => call.path.includes('transport_persisted_hint'))).toBe(false)
+    expect(wrapper.find('.conversation-workspace').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('creates from the circular button, DELETEs a known transport first, and clears the current history item', async () => {
+    const scripted = makeHistoryAppClient()
+    const storage = new MemoryStorage({
+      transportSessionId: 'transport_persisted_hint',
+      cursor: 3,
+    })
+    const wrapper = mount(App, { props: { client: scripted.client, storage } })
+    await settle()
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await settle()
+    expect(wrapper.get('.history-sidebar__select').attributes('aria-current')).toBe('true')
+
+    const beforeCreate = scripted.calls.length
+    await createButton(wrapper).trigger('click')
+    await settle()
+
+    const createdCalls = scripted.calls.slice(beforeCreate)
+    const deleteIndex = createdCalls.findIndex((call) => call.method === 'DELETE')
+    const createIndex = createdCalls.findIndex((call) => isCreatePost(call))
+    expect(deleteIndex).toBeGreaterThanOrEqual(0)
+    expect(createIndex).toBeGreaterThan(deleteIndex)
+    expect(createdCalls[deleteIndex]?.path).toContain('transport_fixture_1')
+    expect(createdCalls[createIndex]?.body).toEqual({})
+    expect(wrapper.find('.conversation-workspace').exists()).toBe(true)
+    expect(wrapper.find('.composer').exists()).toBe(true)
+    expect(wrapper.get('.history-sidebar__select').attributes('aria-current')).toBeUndefined()
+    expectNoMainLifecycleControls(wrapper)
+    wrapper.unmount()
+  })
+
+  it('resumes a history item, hydrates turns, and allows follow-up', async () => {
+    const scripted = makeHistoryAppClient()
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await settle()
+
+    const resumeIndex = scripted.calls.findIndex((call) => isResumePost(call))
+    const historyEventsIndex = scripted.calls.findIndex((call) =>
+      call.method === 'GET' && isHistoryEventsPath(call.path),
+    )
+    const liveEventsIndex = scripted.calls.findIndex((call, index) =>
+      index > historyEventsIndex && call.method === 'GET' && isLiveSsePath(call.path),
+    )
+    expect(deletes(scripted.calls)).toHaveLength(0)
+    expect(resumeIndex).toBeGreaterThanOrEqual(0)
+    expect(historyEventsIndex).toBeGreaterThan(resumeIndex)
+    expect(liveEventsIndex).toBeGreaterThan(historyEventsIndex)
+    expect(scripted.calls[resumeIndex]?.body).toEqual({ resume_session_id: HISTORY_SESSION_ID })
+    expect(scripted.calls[historyEventsIndex]?.path).toContain(`/session-history/${HISTORY_SESSION_ID}/events`)
+    expect(wrapper.get('.history-sidebar__select').attributes('aria-current')).toBe('true')
+    expect(wrapper.get('.app-main').text()).toContain('请检查失败测试')
+    expect(wrapper.get('.app-main').text()).toContain('done')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
+
+    await wrapper.get('textarea').setValue('follow-up')
+    await wrapper.get('form').trigger('submit')
     await flushPromises()
+    expect(scripted.commandCalls).toEqual(['{"type":"SubmitTask","text":"follow-up"}'])
+    wrapper.unmount()
+  })
+
+  it('DELETEs a persisted transport before resume replacement', async () => {
+    const scripted = makeHistoryAppClient()
+    const storage = new MemoryStorage({
+      transportSessionId: 'transport_persisted_hint',
+      cursor: 4,
+    })
+    const wrapper = mount(App, { props: { client: scripted.client, storage } })
+    await settle()
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await settle()
+
+    const deleteIndex = scripted.calls.findIndex((call) => call.method === 'DELETE')
+    const resumeIndex = scripted.calls.findIndex((call) => isResumePost(call))
+    expect(deleteIndex).toBeGreaterThanOrEqual(0)
+    expect(resumeIndex).toBeGreaterThan(deleteIndex)
+    expect(scripted.calls[deleteIndex]?.path).toContain('transport_persisted_hint')
+    expect(scripted.calls[deleteIndex]?.path).not.toContain(HISTORY_SESSION_ID)
+    expect(scripted.calls[resumeIndex]?.body).toEqual({ resume_session_id: HISTORY_SESSION_ID })
+    wrapper.unmount()
+  })
+
+  it('restores a history session that ended INTERRUPTED without a fake disconnect entry', async () => {
+    const scripted = makeHistoryAppClient({
+      historyEvents: interruptedHydrationPage(),
+    })
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await settle()
+
+    expect(wrapper.get('.app-main').text()).toContain('请检查失败测试')
+    expect(wrapper.get('.app-main').text()).toContain('done')
+    expect(wrapper.find('.conversation-workspace').exists()).toBe(true)
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
+    expect(wrapper.get('.app-shell').text()).not.toContain('当前 Session 连接已中断')
+    expect(wrapper.get('.app-shell').text()).not.toContain('当前 Session 已结束')
+    expectNoMainLifecycleControls(wrapper)
+
+    await wrapper.get('textarea').setValue('continue')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(scripted.commandCalls).toEqual(['{"type":"SubmitTask","text":"continue"}'])
+    wrapper.unmount()
+  })
+
+  it('disables create, history selection, and composer while a replacement is in flight', async () => {
+    let releaseDelete: (() => void) | undefined
+    const holdDelete = new Promise<void>((resolve) => {
+      releaseDelete = resolve
+    })
+    const scripted = makeHistoryAppClient({ holdDelete })
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+    await createEmptySession(wrapper)
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await flushPromises()
+    await nextTask()
+
+    expect((createButton(wrapper).element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('.history-sidebar__select').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(true)
+    expect(wrapper.get('[role="status"]').text()).toMatch(/正在切换 session|正在新建 session/)
+    expect(scripted.calls.some((call) => isResumePost(call))).toBe(false)
+
+    releaseDelete?.()
+    await settle()
+    expect((createButton(wrapper).element as HTMLButtonElement).disabled).toBe(false)
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('disables create and selection while a create replacement is in flight', async () => {
+    let releaseCreate: (() => void) | undefined
+    const holdCreate = new Promise<void>((resolve) => {
+      releaseCreate = resolve
+    })
+    const scripted = makeHistoryAppClient({ holdCreate })
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+
+    await createButton(wrapper).trigger('click')
+    await flushPromises()
+    await nextTask()
+
+    expect((createButton(wrapper).element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('.history-sidebar__select').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.get('[role="status"]').text()).toContain('正在新建 session')
+    expect(sessionPosts(scripted.calls).every((call) => isCreatePost(call))).toBe(true)
+    expect(sessionPosts(scripted.calls).some((call) => isResumePost(call))).toBe(false)
+
+    releaseCreate?.()
+    await settle()
+    expect((createButton(wrapper).element as HTMLButtonElement).disabled).toBe(false)
+    expect(wrapper.find('.composer').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { status: 404, code: 'history_not_found', message: 'private backend detail' },
+    { status: 422, code: 'history_unavailable', message: 'DROP TABLE sessions' },
+    { status: 422, code: 'invalid_resume', message: 'cannot resume this file' },
+    { status: 409, code: 'session_exists', message: 'an active transport session already exists' },
+  ])('fail-closes after resume $status $code without auto-creating a session', async ({ status, code, message }) => {
+    const scripted = makeHistoryAppClient({
+      resumeResponse: jsonResponse({ error: { code, message } }, status),
+    })
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await settle()
+
+    const posts = sessionPosts(scripted.calls)
+    expect(posts).toHaveLength(1)
+    expect(posts[0]?.body).toEqual({ resume_session_id: HISTORY_SESSION_ID })
+    expect(wrapper.find('.conversation-workspace').exists()).toBe(false)
+    expect(wrapper.get('.app-shell [role="alert"]').text()).not.toContain(message)
+    expect(wrapper.get('.app-shell [role="alert"]').text()).not.toContain('请关闭其他页面')
+    expect(wrapper.get('.app-shell [role="alert"]').text()).toContain('左侧侧边栏')
+    expectNoMainLifecycleControls(wrapper)
+    expect(wrapper.get('.history-sidebar__select').attributes('aria-current')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('does not switch when the active-turn confirmation is cancelled', async () => {
+    const scripted = makeHistoryAppClient()
+    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(false)
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+    await createEmptySession(wrapper)
+
+    await wrapper.get('textarea').setValue('keep working')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith('将终结当前正在进行的工作并切换 session')
+    expect(deletes(scripted.calls)).toHaveLength(0)
+    expect(sessionPosts(scripted.calls)).toHaveLength(1)
+    expect(sessionPosts(scripted.calls)[0]?.body).toEqual({})
+    expect(wrapper.find('.conversation-workspace').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not create when the active-turn confirmation is cancelled', async () => {
+    const scripted = makeHistoryAppClient()
+    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(false)
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+    await createEmptySession(wrapper)
+
+    await wrapper.get('textarea').setValue('keep working')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    await createButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(deletes(scripted.calls)).toHaveLength(0)
+    expect(sessionPosts(scripted.calls)).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('switches after the active-turn confirmation is accepted', async () => {
+    const scripted = makeHistoryAppClient()
+    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(true)
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+    await createEmptySession(wrapper)
+
+    await wrapper.get('textarea').setValue('leave this turn')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    await settle()
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(deletes(scripted.calls).length).toBeGreaterThan(0)
+    expect(sessionPosts(scripted.calls).some((call) => isResumePost(call))).toBe(true)
+    expect(wrapper.get('.app-main').text()).toContain('done')
+    wrapper.unmount()
+  })
+
+  it('places the title in the sidebar and keeps the main pane blank until the user acts', async () => {
+    const scripted = makeHistoryAppClient()
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
 
     const sidebar = wrapper.get('.history-sidebar')
     expect(sidebar.get('#app-title').text()).toBe('CodingAgentNeo Web')
     expect(sidebar.text()).toContain('请检查失败测试')
     expect(wrapper.get('.app-layout')).toBeTruthy()
     expect(wrapper.get('.app-main .app-shell')).toBeTruthy()
-    expect(wrapper.get('.app-main .conversation-workspace')).toBeTruthy()
-    expect(wrapper.get('.app-main .composer')).toBeTruthy()
+    expect(wrapper.find('.app-main .conversation-workspace').exists()).toBe(false)
     expect(wrapper.find('.app-shell #app-title').exists()).toBe(false)
+    expectNoMainLifecycleControls(wrapper)
     wrapper.unmount()
   })
 
   it('lists history and pages with the opaque next_cursor', async () => {
     const scripted = makeHistoryAppClient()
     const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
 
     const sidebar = wrapper.get('.history-sidebar')
     expect(sidebar.text()).toContain('请检查失败测试')
@@ -604,164 +1011,6 @@ describe('App history sidebar wiring', () => {
     )).toBe(true)
     expect(sidebar.text()).toContain('page two')
     expect(wrapper.find('.history-sidebar__load-more').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('resumes the selected history session, hydrates turns, and allows follow-up', async () => {
-    const scripted = makeHistoryAppClient()
-    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
-
-    await wrapper.get('.history-sidebar__select').trigger('click')
-    await flushPromises()
-    await nextTask()
-    await flushPromises()
-
-    const deleteIndex = scripted.calls.findIndex((call) => call.method === 'DELETE')
-    const resumeIndex = scripted.calls.findIndex((call) => {
-      const body = call.body
-      return call.method === 'POST' &&
-        call.path.endsWith('/sessions') &&
-        typeof body === 'object' &&
-        body !== null &&
-        'resume_session_id' in body
-    })
-    const historyEventsIndex = scripted.calls.findIndex((call) =>
-      call.method === 'GET' && isHistoryEventsPath(call.path),
-    )
-    const liveEventsIndex = scripted.calls.findIndex((call, index) =>
-      index > historyEventsIndex &&
-      call.method === 'GET' &&
-      call.path.includes('/events') &&
-      !isHistoryEventsPath(call.path),
-    )
-    expect(deleteIndex).toBeGreaterThanOrEqual(0)
-    expect(resumeIndex).toBeGreaterThan(deleteIndex)
-    expect(historyEventsIndex).toBeGreaterThan(resumeIndex)
-    expect(liveEventsIndex).toBeGreaterThan(historyEventsIndex)
-    expect(scripted.calls[deleteIndex]?.path).toContain('transport_app_live')
-    expect(scripted.calls[deleteIndex]?.path).not.toContain(HISTORY_SESSION_ID)
-    expect(scripted.calls[resumeIndex]?.body).toEqual({ resume_session_id: HISTORY_SESSION_ID })
-    expect(scripted.calls[historyEventsIndex]?.path).toContain(`/session-history/${HISTORY_SESSION_ID}/events`)
-    expect(wrapper.get('.history-sidebar__select').attributes('aria-current')).toBe('true')
-    expect(wrapper.get('.app-main').text()).toContain('请检查失败测试')
-    expect(wrapper.get('.app-main').text()).toContain('done')
-    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
-
-    await wrapper.get('textarea').setValue('follow-up')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(scripted.commandCalls).toEqual(['{"type":"SubmitTask","text":"follow-up"}'])
-    wrapper.unmount()
-  })
-
-  it('disables the composer and sidebar while a switch is in flight', async () => {
-    let releaseDelete: (() => void) | undefined
-    const holdDelete = new Promise<void>((resolve) => {
-      releaseDelete = resolve
-    })
-    const scripted = makeHistoryAppClient({ holdDelete })
-    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
-
-    await wrapper.get('.history-sidebar__select').trigger('click')
-    await flushPromises()
-    await nextTask()
-
-    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(true)
-    expect((wrapper.get('.history-sidebar__select').element as HTMLButtonElement).disabled).toBe(true)
-    expect(scripted.calls.some((call) => {
-      const body = call.body
-      return call.method === 'POST' &&
-        typeof body === 'object' &&
-        body !== null &&
-        'resume_session_id' in body
-    })).toBe(false)
-
-    releaseDelete?.()
-    await flushPromises()
-    await nextTask()
-    await flushPromises()
-    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
-    wrapper.unmount()
-  })
-
-  it.each([
-    { status: 404, code: 'history_not_found', message: 'private backend detail' },
-    { status: 422, code: 'history_unavailable', message: 'DROP TABLE sessions' },
-    { status: 422, code: 'invalid_resume', message: 'cannot resume this file' },
-    { status: 409, code: 'session_exists', message: 'an active transport session already exists' },
-  ])('fail-closes after resume $status $code without auto-creating a session', async ({ status, code, message }) => {
-    const scripted = makeHistoryAppClient({
-      resumeResponse: jsonResponse({ error: { code, message } }, status),
-    })
-    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
-
-    await wrapper.get('.history-sidebar__select').trigger('click')
-    await flushPromises()
-    await nextTask()
-    await flushPromises()
-
-    const posts = sessionPosts(scripted.calls)
-    expect(posts).toHaveLength(2)
-    expect(posts[0]?.body).toEqual({})
-    expect(posts[1]?.body).toEqual({ resume_session_id: HISTORY_SESSION_ID })
-    expect(wrapper.find('.conversation-workspace').exists()).toBe(false)
-    expect(wrapper.get('.app-shell [role="alert"]').text()).not.toContain(message)
-    expect(wrapper.get('.app-shell [role="alert"]').text()).not.toContain('请关闭其他页面')
-    expect(wrapper.get('.connection-card--session-entry button').text()).toBe('新建 session')
-    expect(wrapper.get('.history-sidebar__select').attributes('aria-current')).toBeUndefined()
-    wrapper.unmount()
-  })
-
-  it('does not switch when the active-turn confirmation is cancelled', async () => {
-    const scripted = makeHistoryAppClient()
-    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(false)
-    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
-
-    await wrapper.get('textarea').setValue('keep working')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    await wrapper.get('.history-sidebar__select').trigger('click')
-    await flushPromises()
-
-    expect(confirm).toHaveBeenCalledWith('将终结当前正在进行的工作并切换 session')
-    expect(scripted.calls.some((call) => call.method === 'DELETE')).toBe(false)
-    expect(sessionPosts(scripted.calls)).toHaveLength(1)
-    expect(wrapper.find('.conversation-workspace').exists()).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('switches after the active-turn confirmation is accepted', async () => {
-    const scripted = makeHistoryAppClient()
-    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(true)
-    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
-
-    await wrapper.get('textarea').setValue('leave this turn')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    await wrapper.get('.history-sidebar__select').trigger('click')
-    await flushPromises()
-    await nextTask()
-    await flushPromises()
-
-    expect(confirm).toHaveBeenCalledTimes(1)
-    expect(scripted.calls.some((call) => call.method === 'DELETE')).toBe(true)
-    expect(sessionPosts(scripted.calls).some((call) => {
-      const body = call.body
-      return typeof body === 'object' && body !== null && 'resume_session_id' in body
-    })).toBe(true)
-    expect(wrapper.get('.app-main').text()).toContain('done')
     wrapper.unmount()
   })
 })
@@ -811,8 +1060,7 @@ describe('App history drawer layout', () => {
     stubMatchMedia(false)
     const scripted = makeHistoryAppClient()
     const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
 
     expect(wrapper.find('.history-drawer-toggle').exists()).toBe(false)
     expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(false)
@@ -830,8 +1078,7 @@ describe('App history drawer layout', () => {
       props: { client: scripted.client, storage: null },
       attachTo: document.body,
     })
-    await nextTask()
-    await flushPromises()
+    await settle()
 
     const toggle = wrapper.get('.history-drawer-toggle')
     expect(toggle.text()).toContain('历史')
@@ -873,17 +1120,14 @@ describe('App history drawer layout', () => {
     stubMatchMedia(true)
     const scripted = makeHistoryAppClient()
     const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
-    await nextTask()
-    await flushPromises()
+    await settle()
 
     await wrapper.get('.history-drawer-toggle').trigger('click')
     await flushPromises()
     expect(wrapper.get('.app-layout').classes()).toContain('app-layout--drawer-open')
 
     await wrapper.get('.history-sidebar__select').trigger('click')
-    await flushPromises()
-    await nextTask()
-    await flushPromises()
+    await settle()
 
     expect(wrapper.get('.history-drawer-toggle').attributes('aria-expanded')).toBe('false')
     expect(wrapper.get('.app-layout').classes()).not.toContain('app-layout--drawer-open')

@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Executing 0.2 change（T01–T08 已验收；T09–T11 未实施）
+> 状态：Executing 0.2 change（T01–T09 已验收；T10–T11 未实施）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -175,7 +175,7 @@ flowchart TD
 
 **完成摘要（2026-09-02）：** 新增 `createNewSession()`，与 `resumeSession()` 共用 `lifecycleBusy` 锁；已知 transport（含未 attach 的持久化 hint）先 DELETE 再唯一 POST。历史 envelopes 走 `HYDRATE_EVENT`：旧 `session_end`/`INTERRUPTED` 只重建 timeline，不关闭或遗忘新 live transport。POST 成功后所有权守恒。主 Agent 复跑 lint/type-check/`test -- src/composables src/domain`（83 passed）/build/`git diff --check` 通过。未改 App/侧边栏/CSS。
 
-### [ ] T09 — 交付侧边栏驱动的 idle / 新建 / resume 交互
+### [x] T09 — 交付侧边栏驱动的 idle / 新建 / resume 交互
 
 **依赖：** T04, T08
 **范围：** 修改 `web/src/App.vue`、`web/src/components/HistorySidebar.vue` 及对应测试：首次挂载只加载历史列表，右侧保持空白且不自动 create/attach/SSE；在侧边栏上部加入小号圆形新建按钮并 emit `create`；历史项 emit `select`。App 将两者接到 T08 的统一 lifecycle controller，移除右侧所有显式 session 新建、重新连接、事件流重连和结束按钮/入口。保留自动 SSE 有限重试和活跃 turn/等待授权的一次确认假设。排除独立滚动与最终视觉几何（T10）。
@@ -192,6 +192,8 @@ flowchart TD
 **排除：** 不改 wire/后端，不用右侧按钮作为 fallback，不实现 sidebar/main 独立滚动或最终尺寸样式。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/App.spec.ts src/components`；`npm --prefix web run build`；`git diff --check`。
+
+**完成摘要（2026-09-02）：** 删除 App `autoConnect`；首屏只拉历史列表，右侧空白。侧边栏圆形「新建 session」接到 `createNewSession()`，历史项接到 `resumeSession()`。主区无结束/重连/新建按钮。主 Agent 复跑 lint/type-check/`test -- src/App.spec.ts src/components`（50 passed）/build 通过。独立浏览器 5173：idle 主区空白、圆形 + 按钮在侧栏、无主区 lifecycle 按钮；无后端时 create 显示 busy 后安全错误，不出现控制卡。未做独立滚动（T10）。
 
 ## 阶段 F：独立滚动、视觉与变更验收
 
@@ -229,4 +231,4 @@ flowchart TD
 
 ## 推荐顺序
 
-T01–T08 已验收。继续按 T09 → T10 → T11 串行执行；每张卡使用全新专用 subagent，主 Agent 独立验收后才勾选。当前最早 dependency-ready 的卡是 T09。
+T01–T09 已验收。继续按 T10 → T11 串行执行；每张卡使用全新专用 subagent，主 Agent 独立验收后才勾选。当前最早 dependency-ready 的卡是 T10。

@@ -109,3 +109,9 @@
 - 选择：reducer 新增 `HYDRATE_EVENT`。它复用同一套 envelope 解析、timeline 追加、sequence 幂等/跳号诊断；但保留 live `connection` / `transportSessionId` / `streamAvailable`，并且若历史事件把 `status` 推进到 `INTERRUPTED`/`FAILED`/`LIMIT_REACHED`，则恢复 hydration 前的 live status。`useAgentSession.dispatch` 只在 live `EVENT` 的 `session_end` 关闭时清除持久化 hint。`createNewSession()` 与 `resumeSession()` 共用 `lifecycleBusy` 锁；`switching` 为其布尔派生。已知 transport 取 `state.transportSessionId ?? storedHint.transportSessionId`。既有 `connect()` 保留给 App 挂载，直到 T09。
 - 理由与替代：把历史 envelopes 再编码后走 live `EVENT` 会让旧 `session_end` 关闭刚 POST 出的 transport 并清掉 ID。独立第二套 timeline 会复制解析与降级规则。仅在 composable 里忽略 `session_end` 仍会让 `agent_end`/`INTERRUPTED` 把 command gate 打进终止态，follow-up 失败。带来源的 reducer action 是最小隔离。
 - 后果：此条落实 2026-09-02 “历史投影不能控制新 resume transport 生命周期”。hydration 失败或 SSE 断线不再是遗忘 transport ID 的证据。T09 可把侧边栏新建/选择接到 `createNewSession`/`resumeSession`，但不得再让历史 `EVENT` 驱动 live 关闭。
+
+## 2026-09-02 — T09：去掉 App `autoConnect`，恢复入口只留侧边栏
+
+- 选择：删除 App 的 `autoConnect` prop 与 mount `connect()` 路径，而不是保留 `autoConnect: false` 作为测试开关。活跃 turn 的 create 与 resume 共用同一句 `window.confirm`。fail-closed/关闭类安全文案改为“请从左侧侧边栏新建或选择历史 session”，主区不再渲染新建/重连/结束按钮。
+- 理由与替代：保留 `autoConnect: true` 会让旧测试继续走自动创建，与“首屏零 session 副作用”冲突。create 与 resume 分两套确认文案没有产品差异；主区保留按钮作 fallback 会再次分散生命周期入口。
+- 后果：composable `connect()` 仍供内部 SSE 有限重试使用，App 不再调用。localStorage transport hint 只在用户点击新建/历史项时由 T08 replacement 清理。独立滚动与圆形按钮最终紫金几何仍属 T10。

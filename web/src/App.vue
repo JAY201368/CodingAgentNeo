@@ -18,11 +18,9 @@ import { projectTimeline } from './domain/timeline'
 const props = withDefaults(defineProps<{
   readonly client?: import('./api/client').AgentHttpClient
   readonly storage?: import('./composables/useAgentSession').UseAgentSessionOptions['storage']
-  readonly autoConnect?: boolean
 }>(), {
   client: undefined,
   storage: undefined,
-  autoConnect: true,
 })
 
 const sharedClient = props.client ?? new AgentHttpClient()
@@ -37,15 +35,11 @@ const HISTORY_SIDEBAR_ID = 'history-sidebar'
 const NARROW_MEDIA_QUERY = '(max-width: 640px)'
 
 const composer = ref<InstanceType<typeof TaskComposer> | null>(null)
-const sessionEntry = ref<globalThis.HTMLElement | null>(null)
 const historyToggle = ref<globalThis.HTMLButtonElement | null>(null)
 const actionError = ref<string | null>(null)
-const connecting = ref(false)
-const endingSession = ref(false)
 const selectedHistorySessionId = ref<string | null>(null)
 const historyDrawerOpen = ref(false)
 const isNarrowViewport = ref(false)
-let connectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 let unsubscribeNarrowMedia: (() => void) | null = null
 
 function closeHistoryDrawer(): void {
@@ -97,29 +91,24 @@ const pendingApproval = computed(() => session.state.value.pendingApproval)
 const isConnected = computed(() =>
   session.state.value.connection === 'connected' && session.transportSessionId.value !== null,
 )
-const showWorkspace = computed(() =>
-  session.transportSessionId.value !== null &&
-  (session.state.value.connection === 'connected' || session.state.value.connection === 'closed'),
-)
-const canRetryConnection = computed(() =>
-  session.state.value.connection === 'error' || session.state.value.connection === 'closed',
-)
-const hasResumeHint = computed(() => session.storedSession.value !== null)
-const streamRetryExhausted = computed(() => session.state.value.streamRetryExhausted === true)
-const showStreamRetry = computed(() =>
-  isConnected.value && !session.state.value.streamAvailable && streamRetryExhausted.value,
-)
-const showEndSession = computed(() =>
-  isConnected.value && session.gate.value.canClose,
-)
+const showWorkspace = computed(() => isConnected.value)
 const hasDiagnostics = computed(() => session.state.value.diagnostics.length > 0)
 const displayError = computed(() => actionError.value ?? session.state.value.lastError)
 const approvalSubmitting = computed(() => session.state.value.commandInFlight === 'ApprovalResponse')
 const composerDisabled = computed(() =>
   !session.gate.value.canSubmitTask || session.switching.value,
 )
+const showMessageTail = computed(() =>
+  displayError.value !== null ||
+  pendingApproval.value !== null ||
+  hasDiagnostics.value,
+)
 
 type ErrorContext = 'resume'
+
+function sidebarRecoveryMessage(prefix: string): string {
+  return `${prefix}请从左侧侧边栏新建或选择历史 session。`
+}
 
 function safeErrorMessage(error: unknown, context?: ErrorContext): string {
   if (error instanceof AgentApiError) {
@@ -132,20 +121,20 @@ function safeErrorMessage(error: unknown, context?: ErrorContext): string {
         return '请求格式无效，请检查输入后重试。'
       case 'session_exists':
         if (context === 'resume') {
-          return '当前 session 已结束，请新建一个本地 session。'
+          return sidebarRecoveryMessage('当前 session 已结束，')
         }
         return '已有一个活动 session。请关闭其他页面后再重试。'
       case 'turn_in_progress':
         return '当前 turn 正在运行，请等待结束后再提交。'
       case 'session_not_found':
       case 'session_closed':
-        return 'Agent session 已关闭或不存在，请新建一个本地 session。'
+        return sidebarRecoveryMessage('Agent session 已关闭或不存在，')
       case 'history_not_found':
-        return '找不到该历史 session。当前 session 已结束，请新建一个本地 session。'
+        return sidebarRecoveryMessage('找不到该历史 session。当前 session 已结束，')
       case 'history_unavailable':
-        return '该历史 session 暂时无法恢复。当前 session 已结束，请新建一个本地 session。'
+        return sidebarRecoveryMessage('该历史 session 暂时无法恢复。当前 session 已结束，')
       case 'invalid_resume':
-        return '该历史 session 无法恢复。当前 session 已结束，请新建一个本地 session。'
+        return sidebarRecoveryMessage('该历史 session 无法恢复。当前 session 已结束，')
       case 'invalid_history_id':
         return '历史 session 标识无效，未改变当前 session。'
       case 'internal_error':
@@ -186,40 +175,11 @@ function needsSwitchConfirmation(): boolean {
   )
 }
 
-async function connect(): Promise<void> {
-  if (connecting.value) {
-    return
+function confirmReplacementIfNeeded(): boolean {
+  if (!needsSwitchConfirmation()) {
+    return true
   }
-  connecting.value = true
-  actionError.value = null
-  try {
-    await session.connect()
-  } catch (error) {
-    handleFailure(error)
-  } finally {
-    connecting.value = false
-  }
-}
-
-function retryConnection(): void {
-  if (connecting.value) {
-    return
-  }
-  // An existing storage hint must be queried again before any new session is
-  // created.  Only a missing/closed hint takes the explicit new-session path.
-  session.stopEvents()
-  if (
-    session.state.value.connection === 'connected' &&
-    session.transportSessionId.value !== null
-  ) {
-    session.startEvents()
-    return
-  }
-  if (session.storedSession.value === null) {
-    session.dispatch({ type: 'RESET' })
-    selectedHistorySessionId.value = null
-  }
-  void connect()
+  return globalThis.confirm('将终结当前正在进行的工作并切换 session')
 }
 
 async function submitTask(text: string): Promise<void> {
@@ -249,33 +209,32 @@ async function respondToApproval(requestId: string, approved: boolean): Promise<
   }
 }
 
-async function endSession(): Promise<void> {
-  if (endingSession.value) {
+function onCreateSession(): void {
+  closeHistoryDrawer()
+  void createSessionFromSidebar()
+}
+
+async function createSessionFromSidebar(): Promise<void> {
+  if (session.switching.value) {
     return
   }
-  endingSession.value = true
+  if (!confirmReplacementIfNeeded()) {
+    return
+  }
   actionError.value = null
   try {
-    // DELETE is the explicit transport lifecycle operation.  It is never
-    // attached to component teardown, so browser teardown is not close evidence.
-    await session.deleteSession()
+    await session.createNewSession()
     selectedHistorySessionId.value = null
-    await nextTick()
-    const reduceMotion = typeof globalThis.matchMedia === 'function' &&
-      globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (typeof sessionEntry.value?.scrollIntoView === 'function') {
-      sessionEntry.value.scrollIntoView({
-        behavior: reduceMotion ? 'auto' : 'smooth',
-        block: 'end',
-      })
-    } else {
-      const root = globalThis.document.scrollingElement ?? globalThis.document.documentElement
-      root.scrollTop = root.scrollHeight
+    try {
+      await history.refresh()
+    } catch {
+      // A list refresh failure must not undo a successful create.
     }
   } catch (error) {
+    if (session.transportSessionId.value === null) {
+      selectedHistorySessionId.value = null
+    }
     handleFailure(error)
-  } finally {
-    endingSession.value = false
   }
 }
 
@@ -288,11 +247,8 @@ async function selectHistorySession(historySessionId: string): Promise<void> {
   if (session.switching.value) {
     return
   }
-  if (needsSwitchConfirmation()) {
-    const confirmed = globalThis.confirm('将终结当前正在进行的工作并切换 session')
-    if (!confirmed) {
-      return
-    }
+  if (!confirmReplacementIfNeeded()) {
+    return
   }
   actionError.value = null
   try {
@@ -322,25 +278,12 @@ function onRefresh(): void {
 onMounted(() => {
   subscribeNarrowMedia()
   globalThis.document.addEventListener('keydown', onDocumentKeydown)
-  if (!props.autoConnect) {
-    return
-  }
-  // Defer the initial network effect by one macrotask so the disconnected
-  // state is rendered first and a slow/unavailable server cannot block mount.
-  connectTimer = globalThis.setTimeout(() => {
-    connectTimer = null
-    void connect()
-  }, 0)
 })
 
 onBeforeUnmount(() => {
   unsubscribeNarrowMedia?.()
   unsubscribeNarrowMedia = null
   globalThis.document.removeEventListener('keydown', onDocumentKeydown)
-  if (connectTimer !== null) {
-    globalThis.clearTimeout(connectTimer)
-    connectTimer = null
-  }
   session.stopEvents()
 })
 </script>
@@ -367,6 +310,8 @@ onBeforeUnmount(() => {
       :has-more="history.hasMore.value"
       :active-session-id="selectedHistorySessionId"
       :switching="session.switching.value"
+      :lifecycle-busy="session.lifecycleBusy.value"
+      @create="onCreateSession"
       @select="onSelectHistory"
       @load-more="onLoadMore"
       @refresh="onRefresh"
@@ -408,22 +353,6 @@ onBeforeUnmount(() => {
         aria-labelledby="app-title"
         :inert="isNarrowViewport && historyDrawerOpen ? true : undefined"
       >
-        <header
-          v-if="showEndSession"
-          class="app-header"
-        >
-          <div class="app-header__actions">
-            <button
-              class="secondary-action app-header__end-session"
-              type="button"
-              :disabled="endingSession || session.switching.value"
-              @click="endSession"
-            >
-              {{ endingSession ? '正在结束…' : '结束 Session' }}
-            </button>
-          </div>
-        </header>
-
         <template v-if="showWorkspace">
           <div class="conversation-workspace">
             <Timeline :items="timelineItems" />
@@ -438,7 +367,7 @@ onBeforeUnmount(() => {
         </template>
 
         <div
-          v-if="displayError || showStreamRetry || pendingApproval !== null || hasDiagnostics || canRetryConnection"
+          v-if="showMessageTail"
           class="message-tail"
         >
           <section
@@ -452,26 +381,6 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             >!</span>
             <span>{{ displayError }}</span>
-          </section>
-
-          <section
-            v-if="showStreamRetry"
-            class="connection-card"
-            aria-labelledby="stream-retry-title"
-          >
-            <h2 id="stream-retry-title">
-              事件流需要重新连接
-            </h2>
-            <p>
-              自动重连已达到有限次数；session 仍保持存活，页面没有自动重放任何命令。
-            </p>
-            <button
-              class="secondary-action"
-              type="button"
-              @click="retryConnection"
-            >
-              重新连接事件流
-            </button>
           </section>
 
           <ApprovalDialog
@@ -490,52 +399,7 @@ onBeforeUnmount(() => {
           >
             部分事件字段未知或不可用，已按安全文本降级展示（{{ session.state.value.diagnostics.length }} 条诊断）。
           </p>
-
-          <section
-            v-if="canRetryConnection"
-            ref="sessionEntry"
-            class="connection-card connection-card--session-entry"
-            aria-label="Session 连接入口"
-          >
-            <p class="connection-card__message">
-              {{ hasResumeHint ? '当前 Session 连接已中断' : '当前 Session 已结束' }}
-            </p>
-            <button
-              class="secondary-action"
-              type="button"
-              :disabled="connecting"
-              @click="retryConnection"
-            >
-              {{ connecting ? '创建中…' : (hasResumeHint ? '重新连接' : '新建 session') }}
-            </button>
-          </section>
         </div>
-
-        <p
-          v-if="!showWorkspace && !canRetryConnection && !connecting"
-          class="loading-note"
-          role="status"
-          aria-live="polite"
-        >
-          <span
-            class="loading-mark"
-            aria-hidden="true"
-          >○</span>
-          <span>尚未连接 Agent 服务</span>
-        </p>
-        <p
-          v-else-if="!showWorkspace && connecting"
-          class="loading-note"
-          role="status"
-          aria-live="polite"
-          aria-busy="true"
-        >
-          <span
-            class="loading-mark"
-            aria-hidden="true"
-          >◌</span>
-          <span>正在连接 Agent 服务…</span>
-        </p>
       </main>
     </div>
   </div>
