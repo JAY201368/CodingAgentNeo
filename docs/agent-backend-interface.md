@@ -2,15 +2,15 @@
 
 > 规范版本：1.2
 > 事件 schema：1；历史 DTO schema：1
-> 基线日期：2026-09-01
+> 基线日期：2026-09-01；文档勘误：2026-09-02
 > 适用范围：AgentBackend 应用端口及其规范语义
 > 规范来源：`backend.py`、`models.py`、`agent_loop.py`、`executor.py`、`assembly.py` 与 adapter 契约测试
 
-本文定义 Agent 后端提供给适配层的应用端口，是共享 Backend Service 实现和 In-process、HTTP/SSE 及未来适配器共同遵守的内部权威规范。它不规定任何前端如何直接接入；CLI、Web 或其他前端只应参考自己所使用的适配层接口规范。本文新增的 workspace history provider、DTO 和异常由 T01 先行版本化、T02–T05 实现，并已由 T06 完成整合验收；本文不把 Web UI 或其他排除项写成当前产品行为。
+本文定义 Agent 后端提供给适配层的应用端口，是共享 Backend Service 实现和 In-process、HTTP/SSE 及未来适配器共同遵守的内部权威规范。它不规定任何前端如何直接接入；CLI、Web 或其他前端只应参考自己所使用的适配层接口规范。本文新增的 workspace history provider、DTO 和异常由 T01 先行版本化、T02–T05 实现，并已由 T06 完成整合验收；本文不把 Web UI 布局或其他产品展示写成端口契约。
 
 文中的“必须”“不得”“应当”是规范性要求；示例只说明结构，不保证 ID、时间戳或具体文案固定。适配层不得通过翻译、缓存或传输机制改变本文的命令、事件、游标、状态、授权和生命周期语义。
 
-baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。后续增量先把其中的共享 Backend Service/Runtime 与端口定义分离，再在该端口之上提供并列的 In-process 和 HTTP/SSE Adapter。两种 adapter 都通过同一个 workspace-scoped `AgentBackendProvider` 取得历史能力和 per-session `AgentBackend`，互不依赖。T01 冻结契约，T02 固定生产存储位置，T03 实现 provider，T04 和 T05 分别完成 In-process 与 HTTP/SSE binding；历史读取均为有限 JSON，Web UI 仍不在本工作流范围内。
+baseline 1.0 交付的是同进程 Python 实现；该历史事实仍成立。后续增量先把其中的共享 Backend Service/Runtime 与端口定义分离，再在该端口之上提供并列的 In-process 和 HTTP/SSE Adapter。两种 adapter 都通过同一个 workspace-scoped `AgentBackendProvider` 取得历史能力和 per-session `AgentBackend`，互不依赖。T01 冻结契约，T02 固定生产存储位置，T03 实现 provider，T04 和 T05 分别完成 In-process 与 HTTP/SSE binding；历史读取均为有限 JSON。Web 如何消费这些 JSON 不属于本文范围。
 
 > [Agent 适配层接口规范](agent-transport-interface.md) 是前端接入的唯一权威文档。前端只参考其中对应的 In-process 或 HTTP/SSE binding，不需要阅读本文；只有 Backend Service 与 adapter 实现者需要本文定义的内部 Port 语义。
 
@@ -391,7 +391,7 @@ class AgentBackend(Protocol):
 payload.request_id == envelope.correlation_id
 ```
 
-`arguments_summary` 是已脱敏、最多约 300 字符的展示字符串；对 `bash`，它是命令字符串的 JSON 编码，而不是可执行参数。Adapter 只能转交它，任何调用者都不能将其当作可信命令重新解析或执行。
+`arguments_summary` 是已脱敏、最多约 300 字符的展示字符串；对 `bash`，它是命令字符串的 JSON 编码，而不是可执行参数。Adapter 只能转交它，任何调用者都不能将其当作可信命令重新解析或执行。`tool_name` 不限于 `bash`：任何策略判定为 `ask` 的工具都会发出结构相同的 `approval_request`。哪些调用进入 `ask` 由 Execution Policy 决定，不属于本端口契约；当前默认交互策略对 `write_file`、`edit_file` 和 `bash` 请求确认，只读文件工具直接 allow。
 
 同一工具调用的 `tool_call`、可选 `approval_request`、`policy_decision` 和 `tool_result` 使用同一 `correlation_id`。`policy_decision.requested` 是策略初始答案，`decision` 是授权后最终答案，枚举为 `allow | ask | deny`；最终 `decision` 不会保持 `ask`。`approved` 在发生用户授权时为 boolean，未发生授权时通常为 `null`。
 

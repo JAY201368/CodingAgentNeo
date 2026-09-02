@@ -1,9 +1,9 @@
 # CodingAgentNeo Agent 适配层接口规范
 
-> 状态：T01–T06 implemented and accepted；Web UI consumption deferred
+> 状态：In-process 与 HTTP/SSE binding 已实施；Web UI 作为独立产品消费第 4 节，不由本文定义
 > 规范版本：1.1
 > wire protocol：1；history DTO schema：1
-> 日期：2026-09-01
+> 日期：2026-09-02
 > 后端依据：[agent-backend-interface.md](agent-backend-interface.md)
 > 实施工作流：[backend-history-discover/](backend-history-discover/)
 
@@ -11,11 +11,10 @@
 
 **本文是所有 Agent 适配层公开 binding 的唯一权威规范。** README、运行示例、实现注释和测试可以链接本文，但不得另行定义或复制命令、wire、事件、状态、游标、授权、错误、安全或生命周期契约。Web 前端实现适配层接入时需要且只需要参考本文，不需要读取 `agent-backend-interface.md`、Python 源码或其他客户端说明文档；Web 产品布局、视觉和交付范围仍由对应产品架构与任务卡控制。
 
-本文不改变 baseline 完成态；当前仓库已有 baseline 的 per-session In-process 和 live
-HTTP/SSE 行为。本工作流的 T01 版本化 workspace history provider、历史 DTO、有限 JSON
-读取和 resume request，T02–T05 已完成固定路径、provider composition、In-process binding 和
-HTTP/SSE binding。Web 客户端仍只消费本文件第 4 节 binding，不直接依赖 Python 端口，也不因
-本次契约更新而获得新的 Web UI；Web UI 仍是明确延期的工作。
+本文不改变 baseline 完成态；当前仓库已有 per-session In-process 和 live HTTP/SSE 行为。
+workspace history provider、历史 DTO、有限 JSON 读取和 resume request 已由
+`backend-history-discover/` 交付。Web 客户端只消费本文件第 4 节 binding，不直接依赖
+Python 端口。Web 产品如何投影事件、选择 session 或展示授权对话框不属于本文契约。
 
 ## 1. 端口与适配器
 
@@ -487,7 +486,7 @@ SSE `data` 必须是以下完整 JSON object；adapter 只序列化 canonical en
 | `agent_end` | `state`, `reason`, `budget` | Agent 生命周期结束 |
 | `session_end` | `state`, `reason`, `budget` | session 生命周期结束 |
 
-授权请求必须满足 `payload.request_id == envelope.correlation_id`，且 request ID 为非空字符串。前端批准或拒绝时只能原样回送该 ID；不得从 `arguments_summary`、tool 参数或展示文本猜测/重建。Escape、断线、超时、关闭和 ID 不匹配均不得产生批准效果。
+授权请求必须满足 `payload.request_id == envelope.correlation_id`，且 request ID 为非空字符串。前端批准或拒绝时只能原样回送该 ID；不得从 `arguments_summary`、tool 参数或展示文本猜测/重建。`tool_name` 标识待授权工具，不限于 `bash`；前端必须按任意工具名展示同一套授权交互。Escape、断线、超时、关闭和 ID 不匹配均不得产生批准效果。
 
 `assistant_message.tool_calls[]` 的公开字段为 `correlation_id`、`provider_tool_call_id`、`name`、`raw_arguments` 和 `diagnostics[]`。`raw_arguments` 是脱敏后的不可信 JSON 文本，不保证可以解析；无效工具名可投影为 `<invalid-tool-name>`。
 
