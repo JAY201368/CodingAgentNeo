@@ -1,6 +1,7 @@
 temp/
 .env
 .DS_Store
+.idea/
 
 docs/temp/
 
