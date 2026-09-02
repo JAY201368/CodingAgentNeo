@@ -15,7 +15,20 @@ interface TimelineTurn {
   readonly final: TimelineItem | null
 }
 
+const rootEl = ref<HTMLElement | null>(null)
 const expandedTurns = ref<ReadonlySet<string>>(new Set())
+
+function nearestScrollContainer(start: HTMLElement | null): HTMLElement {
+  let node: HTMLElement | null = start
+  while (node !== null) {
+    const style = globalThis.getComputedStyle(node)
+    if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+      return node
+    }
+    node = node.parentElement
+  }
+  return (globalThis.document.scrollingElement ?? globalThis.document.documentElement) as HTMLElement
+}
 const turns = computed<readonly TimelineTurn[]>(() => {
   const result: TimelineTurn[] = []
   let prelude: TimelineItem[] = []
@@ -84,8 +97,8 @@ function toggleTurn(key: string): void {
 }
 
 function pageIsNearBottom(): boolean {
-  const root = globalThis.document.scrollingElement ?? globalThis.document.documentElement
-  return root.scrollHeight - root.scrollTop - globalThis.innerHeight <= 160
+  const root = nearestScrollContainer(rootEl.value)
+  return root.scrollHeight - root.scrollTop - root.clientHeight <= 160
 }
 
 watch(() => props.items.length, async (length, previousLength) => {
@@ -95,7 +108,7 @@ watch(() => props.items.length, async (length, previousLength) => {
   const shouldFollow = previousLength === 0 || pageIsNearBottom()
   await nextTick()
   if (shouldFollow) {
-    const root = globalThis.document.scrollingElement ?? globalThis.document.documentElement
+    const root = nearestScrollContainer(rootEl.value)
     root.scrollTop = root.scrollHeight
   }
 })
@@ -103,6 +116,7 @@ watch(() => props.items.length, async (length, previousLength) => {
 
 <template>
   <section
+    ref="rootEl"
     class="timeline"
     aria-label="消息区域"
   >

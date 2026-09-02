@@ -11,19 +11,23 @@
 - T07 — 端到端验收、运行文档与回归门：对照表见 [acceptance.md](acceptance.md)；README 覆盖侧边栏先 DELETE 再 resume；静态扫描无 `v-html`/Python import/误用 fetch。2026-09-02 主 Agent 复跑 Web 124 passed、acceptance 59 passed、四份 workflow validator 通过。全量 pytest 346 passed / 1 failed（本机 ignored 配置未知选项；隔离 `CODING_AGENT_NEO_CONFIG` 后该用例通过）。未跑真实模型/真实浏览器 resume。
 - T08 — 隔离历史 hydration 与 live transport 生命周期：`createNewSession()` 与 `resumeSession()` 共用 `lifecycleBusy` 锁；先 DELETE 已知 transport（含未 attach 的持久化 hint）再唯一 POST；历史 envelopes 走 `HYDRATE_EVENT`，旧 `session_end`/`INTERRUPTED` 不关闭或遗忘新 live transport。2026-09-02 主 Agent 复跑 lint/type-check/`test -- src/composables src/domain`（83 passed）/build/`git diff --check` 通过。未改 App/侧边栏/CSS。
 - T09 — 侧边栏驱动的 idle / 新建 / resume：删除 App `autoConnect`；首屏只拉历史列表，右侧空白。圆形「新建 session」接到 `createNewSession()`，历史项接到 `resumeSession()`；主区无结束/重连/新建按钮。2026-09-02 主 Agent 复跑 lint/type-check/`test -- src/App.spec.ts src/components`（50 passed）/build 通过。独立浏览器：idle 主区空白、侧栏圆形 +、无主区 lifecycle 按钮。
+- T10 — 固定 viewport shell 与左右独立滚动：document/body 不再主滚动；sidebar 与右侧消息区各自 overflow；composer 为右侧 in-flow 底栏。2026-09-02 主 Agent 复跑 lint/type-check/`test`（149 passed）/build 通过。独立浏览器 1280×800 左右独立滚动无横向溢出；360×640 抽屉自身可滚、Escape 焦点返回。
 
 ## Current State
 
-- T09 已验收。可观察行为：
-  - 首次 mount 无 `autoConnect`；只允许历史列表 GET。localStorage transport hint 不触发 attach/`GET /sessions/{id}`/SSE/DELETE/POST。
-  - 右侧 idle 为空白：无“尚未连接”、无 session 控制卡、无结束/重连/新建按钮。`showWorkspace` 仅在 `connected` 且持有 transport 时显示对话流与 composer。
-  - 侧边栏上部圆形按钮 `aria-label="新建 session"`；busy 时禁用新建、选择与加载更多。
-  - `@create` → `createNewSession()`，`@select` → 确认后 `resumeSession()`；成功新建清除当前历史项。活跃 turn 一次 `window.confirm`，取消零 DELETE/POST。
-  - 安全错误可展示并指向左侧侧边栏；历史 `session_end(INTERRUPTED)` 恢复后显示消息与 composer，无伪中断入口。
-  - 窄屏抽屉汉堡/Escape/遮罩/inert/选择后关闭保持。未做独立滚动（T10）。
-  - 主 Agent 复跑（2026-09-02）：lint / type-check / `test -- src/App.spec.ts src/components` **50 passed** / build / `git diff --check` 通过。Vite `http://localhost:5173/` 人工检查：idle 主区空白、圆形 + 在侧栏、主区无 lifecycle 按钮；无后端时点击新建出现 busy 后安全错误，不出现控制卡。未声称真实 Agent HTTP 或真实 resume 通过。
-- T08 已验收。hydration/live 隔离与统一 replacement 仍由 composable/reducer 提供；App 已接到 T09 入口。
-- 用户已确认 0.2 变更计划。剩余缺陷：桌面仍依赖页面根滚动（T10）。T10–T11 未开始。
+- T10 已验收。可观察行为：
+  - `html, body, #app` 固定 viewport（`height: 100%` / `max-height: 100dvh`，`overflow: hidden`）。document/body 不再是长会话主滚动。
+  - 桌面 sidebar 与 `.conversation-workspace__scroll` 各自 `overflow: auto`；滚右不带动 sidebar `scrollTop`/rect，滚左不带动右侧 `scrollTop`。
+  - composer 属于右侧 `.conversation-workspace` 底部栏，`position: relative`。
+  - 圆形新建按钮 2.25rem 紫底金边；disabled 为 opacity + dashed border。
+  - 窄屏 ≤640px overlay 抽屉、inert、Escape/遮罩保持。
+  - 主 Agent 复跑（2026-09-02）：lint / type-check / `test` **149 passed** / build / `git diff --check` 通过。
+  - 独立浏览器（Cursor Chromium，`http://localhost:5173/`）：
+    - **1280×800**：`iw=ih` 1280×800；`scrollWidth===clientWidth===1280`；html/body overflow hidden。滚右：sidebar `{x:0,y:0,w:288,h:800}` 且 `scrollTop=0` 不变，pane `scrollTop=800`。滚左：sidebar `scrollTop=500`，pane 仍 800。两端可到底。新建按钮 36px / `border-radius:50%`。
+    - **360×640** 关闭：无横向溢出；汉堡「历史」；sidebar `x=-288` / inert / hidden。打开：`x=0` 自身可滚（`scrollTop=400`、document 0），shell inert，标题在汉堡下方。Escape 关闭且焦点回「打开历史」。
+- T09 已验收。首屏 idle、侧边栏新建/resume、主区无 lifecycle 按钮。
+- T08 已验收。hydration/live 隔离与统一 replacement 由 composable/reducer 提供。
+- T11 未开始。未声称真实模型网关或真实 resume 端到端通过。
   - scripted Web 旅程由既有 Vitest 覆盖，对照见 [acceptance.md](acceptance.md)；T07 仅补 App 级分页接线（`lists history and pages with the opaque next_cursor`）。
   - README Local runtime 说明侧边栏列出当前 workspace 可 resume session；点击先 DELETE 当前 transport session，再以 `resume_session_id` 创建；历史由有限 JSON 读取补齐，SSE 不 replay；单活跃 session；失败不自动重建；不提交 API Key。
   - 静态边界：`web/src` 无 `v-html`、无 Python import、仅 `client.ts` 调用 `fetch(`；localStorage 只经 `savePersistedTransportSession` 写 transport ID/cursor。T04 spec 曾把字面量 `v-html` 写进断言，导致既有 T10 全源码扫描失败；已改为 `'v-' + 'html'` 拼接，产品代码未使用该指令。
@@ -71,8 +75,7 @@
 
 ## Known Issues
 
-- **当前实现缺陷（待 T10）：** `.app-layout` 只设 `min-height:100vh`，右侧长内容通过 document/body 滚动；sidebar 虽有 `max-height:100vh; overflow:auto`，但仍处于随根页面移动的同一 flex 布局。需固定 viewport shell 并让左右容器独立 overflow。
-- **规划假设待用户确认：** 活跃 turn/等待授权时保留一次确认；确认后执行 replacement，取消则无副作用。用户若希望完全无确认切换，应在 T09 派发前更新架构/任务/决策。
+- 活跃 turn/等待授权时保留一次确认；确认后执行 replacement，取消则无副作用。这是已落地的可逆假设，不是未完成缺陷。
 - 「切换 session」在 wire 上是「先 DELETE 当前、再 POST resume」的串行操作（单活跃 session 规则）；先终结后 resume 失败会导致当前 session 已终结且无活跃 session，须 fail-closed 提示新建，不自动重建（见 `ARCHITECTURE.md` §3.3、`DECISIONS.md`）。T02 状态核与 T05 App 接线均已覆盖该窗口：锁定侧边栏/composer、安全错误、新建入口。
 - resume + live SSE 不 replay 历史事件；目标 session 历史消息由有限历史读取 hydration 后再接续 SSE。T02 覆盖幂等/跳号/多页/截断/未知事件；T05 已把 hydration 结果接到主区 timeline。
 - 活跃 turn/等待授权时切换的一次 `window.confirm` 仍为可逆假设（默认仍终结当前）；若用户希望「运行中也直接无提示切换」或「运行中禁止切换」，须更新 `requirement.md`、`ARCHITECTURE.md` 与 DECISIONS。
@@ -83,4 +86,4 @@
 
 ## Next Recommended Task
 
-- T10 — 固定 viewport shell 并隔离左右滚动。依赖 T09 已验收。按 T10 → T11 串行派发，不并行。
+- T11 — 聚合回归四个纠偏旅程并同步交付文档。依赖 T10 已验收。

@@ -355,7 +355,44 @@ onBeforeUnmount(() => {
       >
         <template v-if="showWorkspace">
           <div class="conversation-workspace">
-            <Timeline :items="timelineItems" />
+            <div class="conversation-workspace__scroll">
+              <Timeline :items="timelineItems" />
+
+              <div
+                v-if="showMessageTail"
+                class="message-tail"
+              >
+                <section
+                  v-if="displayError"
+                  class="alert"
+                  role="alert"
+                  aria-live="assertive"
+                >
+                  <span
+                    class="alert__mark"
+                    aria-hidden="true"
+                  >!</span>
+                  <span>{{ displayError }}</span>
+                </section>
+
+                <ApprovalDialog
+                  :approval="pendingApproval"
+                  :disabled="!session.gate.value.canRespondToApproval"
+                  :submitting="approvalSubmitting"
+                  :stream-available="session.state.value.streamAvailable"
+                  @decide="respondToApproval"
+                />
+
+                <p
+                  v-if="hasDiagnostics"
+                  class="diagnostic-note"
+                  role="status"
+                  aria-live="polite"
+                >
+                  部分事件字段未知或不可用，已按安全文本降级展示（{{ session.state.value.diagnostics.length }} 条诊断）。
+                </p>
+              </div>
+            </div>
 
             <TaskComposer
               ref="composer"
@@ -367,7 +404,7 @@ onBeforeUnmount(() => {
         </template>
 
         <div
-          v-if="showMessageTail"
+          v-else-if="showMessageTail"
           class="message-tail"
         >
           <section

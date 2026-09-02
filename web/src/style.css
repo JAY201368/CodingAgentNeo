@@ -32,17 +32,15 @@
   min-width: 0;
 }
 
-html {
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  max-height: 100dvh;
   min-width: 0;
-  overflow-x: hidden;
-  background: var(--page);
-}
-
-body {
-  min-width: 0;
-  min-height: 100vh;
   margin: 0;
-  overflow-x: hidden;
+  overflow: hidden;
   background: var(--page);
 }
 
@@ -91,22 +89,31 @@ ol {
 .app-layout {
   display: flex;
   align-items: stretch;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   max-width: 100%;
-  min-height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-layout > .history-sidebar {
   flex: 0 0 var(--sidebar-width);
+  align-self: stretch;
   width: var(--sidebar-width);
-  max-height: 100vh;
+  height: 100%;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 1rem 0.85rem 1.5rem;
   border-right: 1px solid var(--border);
   background: var(--surface);
 }
 
 .history-sidebar__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -114,6 +121,7 @@ ol {
   padding-bottom: 0.7rem;
   margin-bottom: 0.25rem;
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .history-sidebar__heading {
@@ -137,18 +145,34 @@ ol {
   place-items: center;
   width: 2.25rem;
   min-width: 2.25rem;
+  max-width: 2.25rem;
   height: 2.25rem;
   min-height: 2.25rem;
   padding: 0;
-  border: 1px solid var(--border-strong);
+  border: 2px solid var(--nju-gold);
   border-radius: 50%;
-  color: var(--nju-purple);
-  background: var(--surface);
+  color: #fff;
+  background: var(--nju-purple);
   font-size: 1.15rem;
+  font-weight: 700;
   line-height: 1;
 }
 
+.history-sidebar__create:hover:not(:disabled) {
+  border-color: var(--nju-gold-ink);
+  background: #3e007d;
+}
+
+.history-sidebar__create:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 2px var(--nju-gold);
+}
+
 .history-sidebar__create:disabled {
+  opacity: 0.55;
+  border-style: dashed;
+  border-color: var(--border-strong);
   color: var(--ink-muted);
   background: var(--surface-soft);
 }
@@ -159,12 +183,26 @@ ol {
   flex-direction: column;
   align-items: stretch;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .app-shell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   width: min(100%, var(--conversation));
   margin: 0 auto;
-  padding: clamp(1.25rem, 4vw, 3.5rem) clamp(0.75rem, 4vw, 1.5rem) 13rem;
+  padding: clamp(1.25rem, 4vw, 3.5rem) clamp(0.75rem, 4vw, 1.5rem) 1.25rem;
+  overflow: hidden;
+}
+
+.app-shell:not(:has(.conversation-workspace)) {
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .app-header {
@@ -199,7 +237,17 @@ ol {
 }
 
 .conversation-workspace {
-  display: block;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.conversation-workspace__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .message-tail {
@@ -211,17 +259,17 @@ ol {
 }
 
 .conversation-workspace .timeline {
-  margin-top: 1.25rem;
+  margin-top: 0;
 }
 
 .conversation-workspace .composer {
-  position: fixed;
-  z-index: 20;
-  right: 0;
-  bottom: 1rem;
-  left: var(--sidebar-width);
-  width: min(calc(100% - var(--sidebar-width) - 1.5rem), var(--conversation));
-  margin: 0 auto;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  margin: 0;
+  padding-top: 0.75rem;
+  background: var(--page);
 }
 
 .section-heading {
@@ -696,6 +744,13 @@ p {
   flex-direction: column;
   gap: 0.65rem;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.history-sidebar > * {
+  flex-shrink: 0;
 }
 
 .history-sidebar:focus {
@@ -848,6 +903,7 @@ p {
 
 .history-drawer-toggle {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 0.45rem;
   align-self: flex-start;
@@ -900,6 +956,7 @@ p {
     height: 100%;
     max-height: 100dvh;
     overflow: auto;
+    overscroll-behavior: contain;
     border-right: 1px solid var(--border);
     box-shadow: var(--shadow);
     transform: translateX(-100%);
@@ -947,10 +1004,11 @@ p {
   }
 
   .conversation-workspace .composer {
-    right: 0;
-    bottom: 0.5rem;
-    left: 0;
-    width: min(calc(100% - 1.5rem), var(--conversation));
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 100%;
   }
 
   .approval-dialog__actions {

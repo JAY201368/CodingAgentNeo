@@ -115,3 +115,9 @@
 - 选择：删除 App 的 `autoConnect` prop 与 mount `connect()` 路径，而不是保留 `autoConnect: false` 作为测试开关。活跃 turn 的 create 与 resume 共用同一句 `window.confirm`。fail-closed/关闭类安全文案改为“请从左侧侧边栏新建或选择历史 session”，主区不再渲染新建/重连/结束按钮。
 - 理由与替代：保留 `autoConnect: true` 会让旧测试继续走自动创建，与“首屏零 session 副作用”冲突。create 与 resume 分两套确认文案没有产品差异；主区保留按钮作 fallback 会再次分散生命周期入口。
 - 后果：composable `connect()` 仍供内部 SSE 有限重试使用，App 不再调用。localStorage transport hint 只在用户点击新建/历史项时由 T08 replacement 清理。独立滚动与圆形按钮最终紫金几何仍属 T10。
+
+## 2026-09-02 — T10：viewport shell 用右侧内部滚动承载 composer，而不是钉在整个 viewport
+
+- 选择：`html, body, #app` 固定为 `height: 100% / max-height: 100dvh` 且 `overflow: hidden`。桌面 `.app-layout` 占满 viewport；sidebar 与 `.app-main` 各自 `min-height: 0`。右侧把 timeline/message-tail 放进 `.conversation-workspace__scroll`（`overflow: auto`），composer 作为 `.conversation-workspace` 的 in-flow 底部栏（`position: relative`），不再使用 `position: fixed; left: var(--sidebar-width)`。sidebar 子项 `flex-shrink: 0`，避免长列表被 flex 压扁而不出现独立滚动。圆形新建按钮保持 2.25rem 紫金圆，disabled 用 opacity + dashed border，不只靠颜色。
+- 理由与替代：viewport-fixed composer 在左右独立滚动后会错位或盖住最后一条消息。sticky footer 对“内容在 composer 之上结束”的几何更脆。flex 列把消息滚动和输入栏拆开，最后一条消息可以滚到 composer 上方。sidebar 若允许子项收缩，长历史在 1280×800 实测 `scrollHeight === clientHeight`。
+- 后果：jsdom 不能替代真实几何；Vitest 打开 `css: true` 以便断言 overflow/position/圆形按钮 computed style。窄屏仍用 640px overlay 抽屉，关闭 inert、打开后抽屉自身滚动。

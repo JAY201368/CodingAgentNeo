@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Executing 0.2 change（T01–T09 已验收；T10–T11 未实施）
+> 状态：Executing 0.2 change（T01–T10 已验收；T11 未实施）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -197,7 +197,7 @@ flowchart TD
 
 ## 阶段 F：独立滚动、视觉与变更验收
 
-### [ ] T10 — 固定 viewport shell 并隔离左右滚动
+### [x] T10 — 固定 viewport shell 并隔离左右滚动
 
 **依赖：** T09
 **范围：** 在 `web/src/style.css` 及必要的 App/组件样式测试中，把桌面布局改成固定 viewport shell：sidebar 与 `.app-main`/主消息区各自拥有纵向 overflow，body/document 不再承载会话长内容的主滚动；完成圆形新建按钮的紧凑紫金视觉。保持 ≤640px overlay 抽屉、composer、焦点、inert、Escape、reduced-motion 与对比度行为。只做布局、视觉和可访问性，不改 session 状态机。
@@ -212,6 +212,8 @@ flowchart TD
 **排除：** 不修改 composable/reducer/wire，不新增 UI 框架、Router、Pinia 或装饰动画。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test`；`npm --prefix web run build`；真实浏览器 1280×800 与 360×640 独立滚动/键盘/reduced-motion/对比度检查；`git diff --check`。
+
+**完成摘要（2026-09-02）：** `html/body/#app` 固定 viewport；sidebar 与 `.conversation-workspace__scroll` 各自 overflow。composer 改为右侧 in-flow 底栏。主 Agent 复跑 lint/type-check/`test`（149 passed）/build 通过。独立浏览器 1280×800：滚右 sidebar `{x:0,y:0,w:288,h:800}` `scrollTop` 不变；滚左 pane `scrollTop` 不变；无横向溢出。360×640：汉堡抽屉、自身可滚、Escape 焦点返回。未改状态机。
 
 ### [ ] T11 — 聚合回归四个纠偏旅程并同步交付文档
 
@@ -231,4 +233,4 @@ flowchart TD
 
 ## 推荐顺序
 
-T01–T09 已验收。继续按 T10 → T11 串行执行；每张卡使用全新专用 subagent，主 Agent 独立验收后才勾选。当前最早 dependency-ready 的卡是 T10。
+T01–T10 已验收。继续派发 T11；使用全新专用 subagent，主 Agent 独立验收后才勾选。

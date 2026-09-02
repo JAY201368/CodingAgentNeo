@@ -3,6 +3,7 @@ import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import fixture from '../domain/fixtures/transport-v1.json'
+import '../style.css'
 import { asCanonicalSessionId } from '../domain/protocol'
 import type { BoundedText, HistoryDiagnostic, SessionHistoryItem } from '../domain/history'
 import { parseSessionHistoryPage } from '../domain/history'
@@ -311,6 +312,11 @@ describe('HistorySidebar', () => {
     const button = create.element as HTMLButtonElement
     button.focus()
     expect(document.activeElement).toBe(button)
+    const style = getComputedStyle(button)
+    expect(style.borderRadius).toBe('50%')
+    expect(style.width).toBe(style.height)
+    expect(Number.parseFloat(style.width)).toBeLessThan(48)
+    expect(style.maxWidth).not.toBe('100%')
     wrapper.unmount()
   })
 
@@ -321,10 +327,13 @@ describe('HistorySidebar', () => {
   })
 
   it('disables the create button while switching and does not emit', async () => {
-    const wrapper = mountSidebar({ switching: true })
+    const wrapper = mountSidebar({ switching: true }, document.body)
     const create = wrapper.get('.history-sidebar__create')
     expect((create.element as HTMLButtonElement).disabled).toBe(true)
     expect(wrapper.get('[role="status"]').text()).toContain('正在切换 session')
+    const style = getComputedStyle(create.element)
+    expect(Number.parseFloat(style.opacity)).toBeLessThan(1)
+    expect(style.borderStyle).toBe('dashed')
     await create.trigger('click')
     expect(wrapper.emitted('create')).toBeUndefined()
   })

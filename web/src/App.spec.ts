@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentHttpClient } from './api/client'
+import './style.css'
 import { DEFAULT_STORAGE_KEY } from './composables/useAgentSession'
 import fixture from './domain/fixtures/transport-v1.json'
 import App from './App.vue'
@@ -247,8 +248,9 @@ describe('App conversation after explicit create', () => {
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
     const conversation = wrapper.get('.conversation-workspace')
     const children = conversation.element.children
-    expect(children[0]?.classList.contains('timeline')).toBe(true)
+    expect(children[0]?.classList.contains('conversation-workspace__scroll')).toBe(true)
     expect(children[1]?.classList.contains('composer')).toBe(true)
+    expect(conversation.find('.conversation-workspace__scroll .timeline').exists()).toBe(true)
     expect(wrapper.find('.final-reply').exists()).toBe(false)
     expect(wrapper.find('.session-controls').exists()).toBe(false)
     expectNoMainLifecycleControls(wrapper)
@@ -1113,6 +1115,32 @@ describe('App history drawer layout', () => {
     await flushPromises()
     expect(wrapper.get('.history-drawer-toggle').attributes('aria-expanded')).toBe('false')
     expect(wrapper.find('.history-drawer-backdrop').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('uses a fixed viewport shell with isolated left/right overflow and an in-flow composer', async () => {
+    stubMatchMedia(false)
+    const scripted = makeHistoryAppClient()
+    const wrapper = mount(App, {
+      props: { client: scripted.client, storage: null },
+      attachTo: document.body,
+    })
+    await settle()
+
+    expect(getComputedStyle(document.documentElement).overflow).toBe('hidden')
+    expect(getComputedStyle(document.body).overflow).toBe('hidden')
+    expect(getComputedStyle(wrapper.get('.app-layout').element).overflow).toBe('hidden')
+    expect(getComputedStyle(wrapper.get('.app-main').element).overflow).toBe('hidden')
+    expect(getComputedStyle(wrapper.get('.history-sidebar').element).overflow).toMatch(/auto|scroll/)
+    expect(wrapper.find('.composer').exists()).toBe(false)
+
+    await createEmptySession(wrapper)
+
+    expect(getComputedStyle(wrapper.get('.composer').element).position).not.toBe('fixed')
+    expect(getComputedStyle(wrapper.get('.conversation-workspace__scroll').element).overflow).toMatch(/auto|scroll/)
+
+    expect(wrapper.get('.conversation-workspace__scroll').element.contains(wrapper.get('.timeline').element)).toBe(true)
+    expect(wrapper.get('.conversation-workspace').element.contains(wrapper.get('.composer').element)).toBe(true)
     wrapper.unmount()
   })
 
