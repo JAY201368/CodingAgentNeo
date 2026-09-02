@@ -1220,7 +1220,8 @@ describe('useAgentSession', () => {
         'session_end',
       ])
       const timeline = projectTimeline(session.state.value.events)
-      expect(timeline.some((item) => item.kind === 'end' && item.title === 'Session 结束')).toBe(true)
+      expect(timeline.some((item) => item.title === 'Session 结束' || item.title === 'Agent 结束')).toBe(false)
+      expect(timeline.some((item) => item.event.type === 'assistant_message')).toBe(true)
       expect(session.gate.value.canSubmitTask).toBe(true)
       expect(storedHint(storage)).toEqual({ transportSessionId: RESUMED_TRANSPORT_ID, cursor: 6 })
 

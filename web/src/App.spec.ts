@@ -238,13 +238,18 @@ describe('App conversation after explicit create', () => {
     expect(wrapper.text()).not.toContain('Assistant 回复')
     expect(wrapper.get('.timeline__process-toggle').text()).toContain('展开思考过程')
     expect(wrapper.findAll('.timeline__sequence')).toHaveLength(0)
+    expect(wrapper.findAll('.timeline__type')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('turn_end')
 
     await wrapper.get('.timeline__process-toggle').trigger('click')
     expect(wrapper.text()).toContain('用户任务')
     expect(wrapper.text()).toContain('Assistant 回复')
-    expect(wrapper.findAll('.timeline__sequence').map((item) => item.text())).toEqual([
-      '#1', '#2', '#3',
-    ])
+    expect(wrapper.findAll('.timeline__sequence')).toHaveLength(0)
+    expect(wrapper.findAll('.timeline__type')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('#1')
+    expect(wrapper.text()).not.toContain('turn_end')
+    expect(wrapper.text()).not.toContain('user_message')
+    expect(wrapper.text()).not.toContain('assistant_message')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
     const conversation = wrapper.get('.conversation-workspace')
     const children = conversation.element.children
@@ -259,6 +264,45 @@ describe('App conversation after explicit create', () => {
     expect(wrapper.find('.connection-status').exists()).toBe(false)
     expect(wrapper.find('.runtime-status').exists()).toBe(false)
 
+    wrapper.unmount()
+  })
+
+  it('hides session/agent lifecycle events even after expanding the thinking process', async () => {
+    const scripted = makeScriptedClient({
+      events: [
+        event(1, 'session_start', { state: 'RUNNING' }),
+        event(2, 'agent_start', { state: 'RUNNING', active_tools: ['read_file'] }),
+        event(3, 'user_message', { text: 'inspect' }),
+        event(4, 'assistant_message', { text: 'draft' }),
+        event(5, 'tool_call', { tool_name: 'read_file' }),
+        event(6, 'policy_decision', { decision: 'allow' }),
+        event(7, 'tool_result', { result: { status: 'success', text: 'ok' } }),
+        event(8, 'turn_end', { state: 'COMPLETED_TURN', assistant_text: 'canonical answer' }),
+      ],
+    })
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+    await createEmptySession(wrapper)
+
+    await wrapper.get('textarea').setValue('inspect')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    await wrapper.get('.timeline__process-toggle').trigger('click')
+    expect(wrapper.text()).toContain('Assistant 回复')
+    expect(wrapper.text()).toContain('工具调用')
+    expect(wrapper.text()).toContain('策略决定')
+    expect(wrapper.text()).toContain('工具结果')
+    expect(wrapper.text()).not.toContain('Session 开始')
+    expect(wrapper.text()).not.toContain('Agent 开始')
+    expect(wrapper.text()).not.toContain('Agent 结束')
+    expect(wrapper.text()).not.toContain('Session 结束')
+    expect(wrapper.findAll('.timeline__sequence')).toHaveLength(0)
+    expect(wrapper.findAll('.timeline__type')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('turn_end')
+    expect(wrapper.text()).not.toContain('tool_call')
+    expect(wrapper.text()).not.toContain('assistant_message')
+    expect(wrapper.text()).not.toContain('policy_decision')
     wrapper.unmount()
   })
 
@@ -982,7 +1026,8 @@ describe('App idle and sidebar lifecycle', () => {
     await settle()
 
     const sidebar = wrapper.get('.history-sidebar')
-    expect(sidebar.get('#app-title').text()).toBe('CodingAgentNeo Web')
+    expect(sidebar.get('#app-title').text()).toBe('CodingAgentNeo')
+    expect(sidebar.text()).not.toContain('CodingAgentNeo Web')
     expect(sidebar.text()).toContain('请检查失败测试')
     expect(wrapper.get('.app-layout')).toBeTruthy()
     expect(wrapper.get('.app-main .app-shell')).toBeTruthy()

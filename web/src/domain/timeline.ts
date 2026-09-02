@@ -20,6 +20,14 @@ export interface TimelineItem {
 }
 const MAX_TIMELINE_TEXT = 20_000
 
+/** Session/agent lifecycle markers are transport facts, not user-facing process. */
+const HIDDEN_TIMELINE_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'session_start',
+  'agent_start',
+  'agent_end',
+  'session_end',
+])
+
 function firstText(
   event: AgentEventEnvelope,
   fields: readonly string[],
@@ -169,5 +177,6 @@ function itemFor(event: AgentEventEnvelope): TimelineItem {
 export function projectTimeline(events: readonly AgentEventEnvelope[]): readonly TimelineItem[] {
   return [...events]
     .sort((left, right) => left.sequence - right.sequence)
+    .filter((event) => !HIDDEN_TIMELINE_EVENT_TYPES.has(event.type))
     .map(itemFor)
 }

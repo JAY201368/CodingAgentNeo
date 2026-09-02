@@ -149,9 +149,7 @@ watch(() => props.items.length, async (length, previousLength) => {
               v-if="isExpanded(turn.key)"
               class="timeline__meta"
             >
-              <span class="timeline__sequence">#{{ turn.user.sequence }}</span>
               <span class="timeline__title">{{ turn.user.title }}</span>
-              <span class="timeline__type">{{ turn.user.event.type }}</span>
             </div>
             <BoundedText
               :value="turn.user.text"
@@ -190,9 +188,7 @@ watch(() => props.items.length, async (length, previousLength) => {
             :class="`timeline__item--${item.kind}`"
           >
             <div class="timeline__meta">
-              <span class="timeline__sequence">#{{ item.sequence }}</span>
               <span class="timeline__title">{{ item.title }}</span>
-              <span class="timeline__type">{{ item.event.type }}</span>
             </div>
             <BoundedText
               :value="item.text"
@@ -217,12 +213,7 @@ watch(() => props.items.length, async (length, previousLength) => {
             class="timeline__item timeline__item--end"
           >
             <div class="timeline__meta">
-              <span
-                v-if="isExpanded(turn.key)"
-                class="timeline__sequence"
-              >#{{ turn.final.sequence }}</span>
               <span class="timeline__title">{{ turn.final.title }}</span>
-              <span class="timeline__type">{{ turn.final.event.type }}</span>
             </div>
             <BoundedText
               :value="turn.final.text"

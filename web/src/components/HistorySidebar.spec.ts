@@ -74,17 +74,18 @@ describe('HistorySidebar', () => {
         switching: false,
       },
       slots: {
-        title: '<p class="eyebrow">CodingAgentNeo</p><h1 id="app-title">CodingAgentNeo Web</h1>',
+        title: '<h1 id="app-title">CodingAgentNeo</h1>',
       },
     })
-    expect(wrapper.get('.history-sidebar__header #app-title').text()).toBe('CodingAgentNeo Web')
+    expect(wrapper.get('.history-sidebar__header #app-title').text()).toBe('CodingAgentNeo')
     expect(wrapper.get('aside').element.contains(wrapper.get('#app-title').element)).toBe(true)
   })
 
-  it('renders summaries, timestamps, states, and resumable flags in list order', () => {
+  it('renders first-message summaries and Beijing time, hiding status labels', () => {
     const first = historyItem({
       session_id: 'session_fixture_1',
       first_user_message: boundedText('first summary'),
+      created_at: '2026-09-01T08:00:00.000000Z',
       updated_at: '2026-09-01T08:01:00.000000Z',
       last_state: 'COMPLETED_TURN',
       resumable: true,
@@ -93,11 +94,11 @@ describe('HistorySidebar', () => {
       session_id: 'session_fixture_2',
       first_user_message: boundedText('second summary'),
       created_at: '2026-09-01T07:00:00.000000Z',
-      updated_at: null,
+      updated_at: '2026-09-01T09:00:00.000000Z',
       last_state: 'WAITING_FOR_INPUT',
-      resumable: false,
+      resumable: true,
     })
-    const wrapper = mountSidebar({ items: [first, second] })
+    const wrapper = mountSidebar({ items: [second, first] })
 
     expect(wrapper.find('[role="list"]').exists()).toBe(true)
     expect(wrapper.findAll('[role="listitem"]')).toHaveLength(2)
@@ -106,44 +107,75 @@ describe('HistorySidebar', () => {
       'second summary',
     ])
     expect(wrapper.findAll('.history-sidebar__time').map((node) => node.text())).toEqual([
-      '2026-09-01T08:01:00.000000Z',
-      '2026-09-01T07:00:00.000000Z',
+      '2026-09-01 16:00',
+      '2026-09-01 15:00',
     ])
-    expect(wrapper.findAll('.history-sidebar__state').map((node) => node.text())).toEqual([
-      'COMPLETED_TURN',
-      'WAITING_FOR_INPUT',
+    expect(wrapper.find('.history-sidebar__state').exists()).toBe(false)
+    expect(wrapper.find('.history-sidebar__resume').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('COMPLETED_TURN')
+    expect(wrapper.text()).not.toContain('WAITING_FOR_INPUT')
+    expect(wrapper.text()).not.toContain('可恢复')
+    expect(wrapper.text()).not.toContain('2026-09-01T08:00:00.000000Z')
+  })
+
+  it('sorts visible items by created_at descending, not by last activation', () => {
+    const activatedLater = historyItem({
+      session_id: 'session_older_created',
+      first_user_message: boundedText('older created'),
+      created_at: '2026-09-01T07:00:00.000000Z',
+      updated_at: '2026-09-01T12:00:00.000000Z',
+    })
+    const createdLater = historyItem({
+      session_id: 'session_newer_created',
+      first_user_message: boundedText('newer created'),
+      created_at: '2026-09-01T08:00:00.000000Z',
+      updated_at: '2026-09-01T08:01:00.000000Z',
+    })
+    const wrapper = mountSidebar({ items: [activatedLater, createdLater] })
+    expect(wrapper.findAll('.history-sidebar__summary').map((node) => node.text())).toEqual([
+      'newer created',
+      'older created',
     ])
-    expect(wrapper.findAll('.history-sidebar__resume').map((node) => node.text())).toEqual([
-      '可恢复',
-      '不可恢复',
-    ])
-    expect(wrapper.text()).toContain('不可恢复')
   })
 
   it('renders the shared history fixture without executing markup', () => {
     const page = parseSessionHistoryPage(fixture.history.list)
     const wrapper = mountSidebar({ items: page.sessions })
     expect(wrapper.text()).toContain('请检查失败测试')
-    expect(wrapper.text()).toContain('COMPLETED_TURN')
-    expect(wrapper.text()).toContain('可恢复')
+    expect(wrapper.text()).toContain('2026-09-01 16:00')
+    expect(wrapper.text()).not.toContain('COMPLETED_TURN')
+    expect(wrapper.text()).not.toContain('可恢复')
     expect(wrapper.html()).not.toContain('v-' + 'html')
   })
 
-  it('keeps non-resumable items visible and does not emit select', async () => {
+  it('hides non-resumable items and does not emit select', async () => {
     const blocked = historyItem({
       session_id: 'session_fixture_blocked',
       first_user_message: boundedText('blocked task'),
       resumable: false,
     })
-    const wrapper = mountSidebar({ items: [blocked] })
-    const button = wrapper.get('.history-sidebar__select')
+    const visible = historyItem({
+      session_id: 'session_fixture_1',
+      first_user_message: boundedText('open task'),
+    })
+    const wrapper = mountSidebar({ items: [blocked, visible] })
 
-    expect(wrapper.text()).toContain('blocked task')
-    expect(wrapper.text()).toContain('不可恢复')
-    expect((button.element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.text()).not.toContain('blocked task')
+    expect(wrapper.text()).not.toContain('不可恢复')
+    expect(wrapper.text()).toContain('open task')
+    expect(wrapper.findAll('[role="listitem"]')).toHaveLength(1)
 
-    await button.trigger('click')
-    expect(wrapper.emitted('select')).toBeUndefined()
+    await wrapper.get('.history-sidebar__select').trigger('click')
+    expect(wrapper.emitted('select')).toEqual([['session_fixture_1']])
+  })
+
+  it('shows the empty state when every item is non-resumable', () => {
+    const wrapper = mountSidebar({
+      items: [historyItem({ resumable: false, first_user_message: boundedText('blocked task') })],
+    })
+    expect(wrapper.text()).toContain('还没有历史 session')
+    expect(wrapper.text()).not.toContain('blocked task')
+    expect(wrapper.find('[role="list"]').exists()).toBe(false)
   })
 
   it('emits select(session_id) for a resumable item', async () => {
@@ -270,14 +302,14 @@ describe('HistorySidebar', () => {
     expect(wrapper.html()).not.toContain('v-' + 'html')
   })
 
-  it('shows diagnostic codes quietly and does not render diagnostic messages', () => {
+  it('does not render diagnostic codes or messages', () => {
     const diagnostics: readonly HistoryDiagnostic[] = [
       { code: 'truncated_payload', message: '/var/secret/session.jsonl' },
     ]
     const wrapper = mountSidebar({
       items: [historyItem({ diagnostics })],
     })
-    expect(wrapper.text()).toContain('truncated_payload')
+    expect(wrapper.text()).not.toContain('truncated_payload')
     expect(wrapper.text()).not.toContain('/var/secret/session.jsonl')
   })
 
@@ -308,6 +340,8 @@ describe('HistorySidebar', () => {
     const create = wrapper.get('.history-sidebar__create')
     expect(create.attributes('aria-label')).toBe('新建 session')
     expect(create.attributes('type')).toBe('button')
+    expect(create.find('.history-sidebar__create-mark').exists()).toBe(true)
+    expect(create.text()).toBe('')
     expect((create.element as HTMLButtonElement).disabled).toBe(false)
     const button = create.element as HTMLButtonElement
     button.focus()

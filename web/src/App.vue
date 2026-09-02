@@ -317,11 +317,8 @@ onBeforeUnmount(() => {
       @refresh="onRefresh"
     >
       <template #title>
-        <p class="eyebrow">
-          CodingAgentNeo
-        </p>
         <h1 id="app-title">
-          CodingAgentNeo Web
+          CodingAgentNeo
         </h1>
       </template>
     </HistorySidebar>

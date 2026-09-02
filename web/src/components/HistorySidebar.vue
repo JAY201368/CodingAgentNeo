@@ -24,41 +24,64 @@ const emit = defineEmits<{
 }>()
 
 const showInitialLoading = computed(() => props.loading && props.items.length === 0)
+const visibleItems = computed(() => {
+  const resumable = props.items.filter((item) => item.resumable)
+  return [...resumable].sort((left, right) => itemCreatedMs(right) - itemCreatedMs(left))
+})
 const showEmpty = computed(() =>
-  !props.loading && props.error === null && props.items.length === 0,
+  !props.loading && props.error === null && visibleItems.value.length === 0,
 )
 const busy = computed(() => props.switching || props.lifecycleBusy !== null)
 const busyStatus = computed(() =>
   props.lifecycleBusy === 'create' ? '正在新建 session…' : '正在切换 session…',
 )
 
+function itemCreatedMs(item: SessionHistoryItem): number {
+  const raw = item.created_at ?? item.updated_at
+  if (raw === null) {
+    return 0
+  }
+  const ms = Date.parse(raw)
+  return Number.isNaN(ms) ? 0 : ms
+}
+
 function itemSummary(item: SessionHistoryItem): string {
   const text = safeDisplayText(item.first_user_message.text, 240).trim()
   return text.length > 0 ? text : '（无首条用户消息）'
 }
 
+function formatBeijingTime(value: string | null): string {
+  if (value === null || value.trim().length === 0) {
+    return '时间未知'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '时间未知'
+  }
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const read = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? ''
+  return `${read('year')}-${read('month')}-${read('day')} ${read('hour')}:${read('minute')}`
+}
+
 function itemTimestamp(item: SessionHistoryItem): string {
-  return item.updated_at ?? item.created_at ?? '时间未知'
-}
-
-function itemState(item: SessionHistoryItem): string {
-  return item.last_state ?? '状态未知'
-}
-
-function resumableLabel(item: SessionHistoryItem): string {
-  return item.resumable ? '可恢复' : '不可恢复'
-}
-
-function diagnosticCodes(item: SessionHistoryItem): string {
-  return item.diagnostics.map((diagnostic) => diagnostic.code).join(' · ')
+  return formatBeijingTime(item.created_at ?? item.updated_at)
 }
 
 function isActive(item: SessionHistoryItem): boolean {
   return props.activeSessionId === item.session_id
 }
 
-function canSelect(item: SessionHistoryItem): boolean {
-  return item.resumable && !busy.value
+function canSelect(): boolean {
+  return !busy.value
 }
 
 function createSession(): void {
@@ -69,7 +92,7 @@ function createSession(): void {
 }
 
 function selectItem(item: SessionHistoryItem): void {
-  if (!canSelect(item)) {
+  if (!canSelect()) {
     return
   }
   emit('select', item.session_id)
@@ -109,7 +132,19 @@ function refresh(): void {
         :disabled="busy"
         @click="createSession"
       >
-        <span aria-hidden="true">+</span>
+        <svg
+          class="history-sidebar__create-mark"
+          viewBox="0 0 16 16"
+          width="14"
+          height="14"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path
+            fill="currentColor"
+            d="M7 2h2v12H7zM2 7h12v2H2z"
+          />
+        </svg>
       </button>
     </header>
 
@@ -174,24 +209,21 @@ function refresh(): void {
     </p>
 
     <ul
-      v-if="items.length > 0"
+      v-if="visibleItems.length > 0"
       class="history-sidebar__list"
       role="list"
     >
       <li
-        v-for="item in items"
+        v-for="item in visibleItems"
         :key="item.session_id"
         class="history-sidebar__item"
-        :class="{
-          'history-sidebar__item--current': isActive(item),
-          'history-sidebar__item--blocked': !item.resumable,
-        }"
+        :class="{ 'history-sidebar__item--current': isActive(item) }"
         role="listitem"
       >
         <button
           class="history-sidebar__select"
           type="button"
-          :disabled="!canSelect(item)"
+          :disabled="!canSelect()"
           :aria-current="isActive(item) ? 'true' : undefined"
           @click="selectItem(item)"
         >
@@ -202,20 +234,7 @@ function refresh(): void {
               class="history-sidebar__current-mark"
             >当前</span>
             <span class="history-sidebar__time">{{ itemTimestamp(item) }}</span>
-            <span class="history-sidebar__state">{{ itemState(item) }}</span>
-            <span
-              class="history-sidebar__resume"
-              :class="{ 'history-sidebar__resume--blocked': !item.resumable }"
-            >{{ resumableLabel(item) }}</span>
           </span>
-          <span
-            v-if="item.first_user_message.truncated"
-            class="history-sidebar__note"
-          >摘要已截断</span>
-          <span
-            v-if="item.diagnostics.length > 0"
-            class="history-sidebar__diagnostics"
-          >{{ diagnosticCodes(item) }}</span>
         </button>
       </li>
     </ul>
