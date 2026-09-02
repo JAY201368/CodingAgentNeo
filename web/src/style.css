@@ -229,8 +229,7 @@ ol {
   justify-content: flex-end;
 }
 
-.connection-card,
-.approval-collapsed {
+.connection-card {
   margin-top: 1.25rem;
   padding: clamp(1rem, 3vw, 1.5rem);
   border: 1px solid var(--border);
@@ -369,8 +368,7 @@ ol {
 
 .primary-action,
 .secondary-action,
-.bounded-text__toggle,
-.approval-dialog__close {
+.bounded-text__toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -418,15 +416,6 @@ ol {
   text-underline-offset: 0.15em;
 }
 
-.approval-dialog__close {
-  padding: 0.45rem 0.65rem;
-  border: 1px solid transparent;
-  color: var(--ink-muted);
-  background: transparent;
-  text-decoration: underline;
-  text-underline-offset: 0.15em;
-}
-
 .primary-action:disabled {
   border-color: #8a7f91;
   background: #8a7f91;
@@ -434,8 +423,7 @@ ol {
 }
 
 .secondary-action:disabled,
-.bounded-text__toggle:disabled,
-.approval-dialog__close:disabled {
+.bounded-text__toggle:disabled {
   border-color: var(--border);
   background: #ece9ed;
   color: var(--ink-muted);
@@ -504,31 +492,39 @@ ol {
   font-weight: 800;
 }
 
-.approval-backdrop {
-  position: relative;
-  z-index: 1;
-  margin-top: 1.25rem;
-}
-
 .approval-dialog {
   max-width: 48rem;
-  margin: 0 auto;
-  padding: clamp(1rem, 3vw, 1.5rem);
-  border: 2px solid var(--nju-gold);
+  margin: 1.25rem 0 0;
+  padding: 0.95rem 1.05rem 1.05rem;
+  border: 1px solid color-mix(in srgb, var(--nju-purple) 22%, white);
   border-radius: 1rem;
-  background: #fffdf8;
-  box-shadow: 0 0.8rem 2rem rgb(36 31 40 / 9%);
+  background: var(--surface-purple);
+  box-shadow: var(--shadow);
+}
+
+.approval-dialog h2 {
+  margin: 0;
+  color: var(--nju-purple);
+  font-size: 1.05rem;
+  line-height: 1.35;
 }
 
 .approval-dialog > p {
-  margin: 0.7rem 0;
-  line-height: 1.6;
+  margin: 0.45rem 0 0;
+  color: var(--ink);
+  line-height: 1.55;
 }
 
-.approval-dialog__meta,
-.approval-dialog__status {
-  color: var(--ink-muted);
-  font-size: 0.85rem;
+.approval-dialog__command {
+  margin-top: 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.approval-dialog__command .bounded-text__value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.92rem;
 }
 
 .approval-dialog__warning {
@@ -541,22 +537,11 @@ ol {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.6rem;
-  margin-top: 1rem;
+  margin-top: 0.95rem;
 }
 
 .approval-dialog__deny {
   border-color: var(--nju-purple);
-}
-
-.approval-collapsed {
-  border-color: var(--nju-gold);
-  background: var(--surface-gold);
-}
-
-.approval-collapsed p {
-  margin: 0 0 0.7rem;
-  color: var(--ink-muted);
-  line-height: 1.6;
 }
 
 .timeline__empty,

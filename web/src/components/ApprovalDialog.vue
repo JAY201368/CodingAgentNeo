@@ -18,13 +18,10 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   decide: [requestId: string, approved: boolean]
-  dismiss: []
 }>()
 
 const approveButton = ref<HTMLButtonElement | null>(null)
-const reopenButton = ref<HTMLButtonElement | null>(null)
 const dialogElement = ref<HTMLElement | null>(null)
-const open = ref(false)
 const submitted = ref(false)
 let lastFocusedElement: HTMLElement | null = null
 
@@ -33,7 +30,7 @@ function approvalKey(approval: PendingApproval | null): string {
 }
 
 function focusApproval(): void {
-  if (open.value) {
+  if (props.approval !== null) {
     void nextTick(() => approveButton.value?.focus())
   }
 }
@@ -69,8 +66,9 @@ function focusableElements(): HTMLElement[] {
 
 function handleDialogKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' || event.key === 'Esc' || event.key.toLowerCase() === 'esc') {
+    // Escape is not a decision and does not dismiss the request.
     event.preventDefault()
-    closeWithoutDecision()
+    event.stopPropagation()
     return
   }
   if (event.key !== 'Tab') {
@@ -98,13 +96,13 @@ function handleDialogKeydown(event: KeyboardEvent): void {
 function handleDialogFocusout(event: FocusEvent): void {
   const dialog = dialogElement.value
   const nextElement = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
-  if (!open.value || dialog === null || (nextElement !== null && dialog.contains(nextElement))) {
+  if (props.approval === null || dialog === null || (nextElement !== null && dialog.contains(nextElement))) {
     return
   }
   // Keep the modal keyboard scope intact when focus leaves through a pointer
   // or an assistive-technology command instead of a trapped Tab key.
   void nextTick(() => {
-    if (open.value) {
+    if (props.approval !== null) {
       approveButton.value?.focus()
     }
   })
@@ -112,13 +110,11 @@ function handleDialogFocusout(event: FocusEvent): void {
 
 watch(() => approvalKey(props.approval), (key) => {
   if (key.length === 0) {
-    open.value = false
     submitted.value = false
     restoreFocus()
     return
   }
   rememberFocus()
-  open.value = true
   submitted.value = false
   focusApproval()
 }, { immediate: true })
@@ -130,21 +126,6 @@ onMounted(() => {
     focusApproval()
   }
 })
-
-function closeWithoutDecision(): void {
-  // Escape, backdrop clicks, unmount, and stream loss never emit a decision.
-  open.value = false
-  emit('dismiss')
-  void nextTick(() => reopenButton.value?.focus())
-}
-
-function reopen(): void {
-  if (props.approval === null) {
-    return
-  }
-  open.value = true
-  focusApproval()
-}
 
 function decide(approved: boolean): void {
   const approval = props.approval
@@ -167,99 +148,62 @@ function decide(approved: boolean): void {
 
 <template>
   <section
-    v-if="approval !== null && !open"
-    class="approval-collapsed"
-    aria-live="polite"
+    v-if="approval !== null"
+    ref="dialogElement"
+    class="approval-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="approval-dialog-title"
+    aria-describedby="approval-dialog-description"
+    :aria-busy="disabled || submitting || submitted"
+    tabindex="-1"
+    @keydown="handleDialogKeydown"
+    @focusout="handleDialogFocusout"
   >
-    <p>
-      有一个授权请求仍在等待处理；未因 Escape 或关闭对话框而批准。
+    <h2 id="approval-dialog-title">
+      需要授权
+    </h2>
+    <p id="approval-dialog-description">
+      请求执行 {{ safeDisplayText(approval.toolName, 200) }}
     </p>
-    <button
-      ref="reopenButton"
-      class="secondary-action"
-      type="button"
-      @click="reopen"
+    <BoundedText
+      class="approval-dialog__command"
+      :value="approval.argumentsSummary"
+      label="命令"
+    />
+    <p
+      v-if="!streamAvailable"
+      class="approval-dialog__warning"
+      role="alert"
     >
-      打开授权对话框
-    </button>
+      事件流已断开，无法授权；可使用 Stop 中断当前 turn。
+    </p>
+    <p
+      v-else-if="submitted || submitting"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    >
+      决定已提交
+    </p>
+    <div class="approval-dialog__actions">
+      <button
+        ref="approveButton"
+        class="primary-action"
+        type="button"
+        :disabled="disabled || submitting || submitted || !streamAvailable"
+        @click="decide(true)"
+      >
+        批准
+      </button>
+      <button
+        class="secondary-action approval-dialog__deny"
+        type="button"
+        :disabled="disabled || submitting || submitted || !streamAvailable"
+        @click="decide(false)"
+      >
+        拒绝
+      </button>
+    </div>
   </section>
-
-  <div
-    v-else-if="approval !== null"
-    class="approval-backdrop"
-    role="presentation"
-    @click.self="closeWithoutDecision"
-  >
-    <section
-      ref="dialogElement"
-      class="approval-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="approval-dialog-title"
-      aria-describedby="approval-dialog-description"
-      :aria-busy="disabled || submitting || submitted"
-      tabindex="-1"
-      @keydown="handleDialogKeydown"
-      @focusout="handleDialogFocusout"
-    >
-      <div class="section-heading">
-        <h2 id="approval-dialog-title">
-          需要授权
-        </h2>
-        <span class="section-heading__hint">仅此一个待处理请求</span>
-      </div>
-      <p id="approval-dialog-description">
-        Agent 请求执行工具「{{ safeDisplayText(approval.toolName, 200) }}」。下面内容是后端脱敏摘要，仅作查看。
-      </p>
-      <BoundedText
-        :value="approval.argumentsSummary"
-        label="授权摘要"
-      />
-      <p class="approval-dialog__meta">
-        请求 ID 已与事件关联校验；超时：{{ approval.timeoutSeconds === null ? '不可用' : `${approval.timeoutSeconds} 秒` }}。
-      </p>
-      <p
-        v-if="!streamAvailable"
-        class="approval-dialog__warning"
-        role="alert"
-      >
-        事件流已断开，授权操作保持关闭；可使用 Stop 中断当前 turn。
-      </p>
-      <p
-        v-else-if="submitted || submitting"
-        class="approval-dialog__status"
-        role="status"
-        aria-live="polite"
-      >
-        决定已提交，等待匹配的 policy event；按钮已锁定。
-      </p>
-      <div class="approval-dialog__actions">
-        <button
-          ref="approveButton"
-          class="primary-action"
-          type="button"
-          :disabled="disabled || submitting || submitted || !streamAvailable"
-          @click="decide(true)"
-        >
-          批准
-        </button>
-        <button
-          class="secondary-action approval-dialog__deny"
-          type="button"
-          :disabled="disabled || submitting || submitted || !streamAvailable"
-          @click="decide(false)"
-        >
-          拒绝
-        </button>
-        <button
-          class="approval-dialog__close"
-          type="button"
-          :disabled="submitted || submitting"
-          @click="closeWithoutDecision"
-        >
-          稍后处理
-        </button>
-      </div>
-    </section>
-  </div>
 </template>
