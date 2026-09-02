@@ -9,12 +9,20 @@
 - T05 — sidebar + 右侧居中主区与恢复旅程接线：标题在侧边栏顶部；`select` 接到 `resumeSession`；switching 锁定 composer；失败 fail-closed 并给出新建入口；活跃 turn 一次确认。2026-09-01 主 Agent 复跑 lint/type-check/`test`（120 passed）/build 通过。窄屏抽屉与视觉打磨留 T06。
 - T06 — Codex 式侧边栏视觉、响应式与可访问性：640px 起 overlay 抽屉；汉堡 `aria-expanded`/`aria-controls`；Escape/遮罩关闭；状态不只靠颜色。2026-09-02 主 Agent 复跑 lint/type-check/`test`（123 passed）/build 通过。独立浏览器：桌面 1379px 无溢出、无汉堡、侧边栏 288px；360px 无溢出，「历史」打开后 sidebarLeft=0，Escape 关闭。未声称真实 resume 通过。
 - T07 — 端到端验收、运行文档与回归门：对照表见 [acceptance.md](acceptance.md)；README 覆盖侧边栏先 DELETE 再 resume；静态扫描无 `v-html`/Python import/误用 fetch。2026-09-02 主 Agent 复跑 Web 124 passed、acceptance 59 passed、四份 workflow validator 通过。全量 pytest 346 passed / 1 failed（本机 ignored 配置未知选项；隔离 `CODING_AGENT_NEO_CONFIG` 后该用例通过）。未跑真实模型/真实浏览器 resume。
+- T08 — 隔离历史 hydration 与 live transport 生命周期：`createNewSession()` 与 `resumeSession()` 共用 `lifecycleBusy` 锁；先 DELETE 已知 transport（含未 attach 的持久化 hint）再唯一 POST；历史 envelopes 走 `HYDRATE_EVENT`，旧 `session_end`/`INTERRUPTED` 不关闭或遗忘新 live transport。2026-09-02 主 Agent 复跑 lint/type-check/`test -- src/composables src/domain`（83 passed）/build/`git diff --check` 通过。未改 App/侧边栏/CSS。
 
 ## Current State
 
-- 2026-09-02 change-control 规划已形成，等待用户确认；尚未派发 subagent，尚未修改 `web/` 产品代码。T01–T07 仍是历史已验收基线，T08–T11 均未开始。
-- 当前代码仍存在用户复现的四项缺陷：挂载会自动创建/attach session；主区依赖页面根滚动而带动侧栏；历史 hydration 的旧 `session_end` 会污染新 resume transport 的 live 状态并可遗忘其 ID、诱发后续 `409 session_exists`；右侧仍有显式结束/重连/新建按钮。规划修复顺序为 T08 状态核 → T09 侧边栏交互 → T10 独立滚动 → T11 聚合验收。
-- T07 已验收。工作流 T01–T07 全部完成。
+- T08 已验收。可观察行为：
+  - `createNewSession()` 与 `resumeSession()` 共用 `lifecycleBusy` 不可重入锁；`switching` 是该锁的布尔派生。并发 create/resume 最多一个 lifecycle POST，POST 不自动重放。
+  - 两条路径都先停止 SSE，再 DELETE 前端已知 transport（`state.transportSessionId` 或尚未 attach 的持久化 hint；404/410 幂等成功；网络失败停止且不 POST），然后 RESET、唯一一次 POST、立即登记新 `transport_session_id`，再启动 live SSE。无已知 transport 时跳过 DELETE。
+  - `createNewSession()` 发送 `POST /sessions {}`；`resumeSession()` 发送 `POST /sessions {resume_session_id}`。非法 history ID 仍在 DELETE/POST 之前失败。
+  - 历史 envelopes 经 `HYDRATE_EVENT` 进入 timeline/cursor/diagnostics；历史 `turn_end(INTERRUPTED)` / `agent_end` / `session_end` 不把 live `connection` 改为 closed、不清除新 transport ID、不把 live status 改成终止态。仅此后的 live `EVENT` `session_end` 关闭当前 transport 投影。
+  - POST 成功后立即 persist；hydration 失败或 SSE 断线仍保留 transport ID，下一次 replacement 仍能先 DELETE 它。
+  - 保留既有 `connect()` 与首次挂载行为（T09 才改 UI）；未改 `App.vue`、`HistorySidebar.vue`、布局 CSS、wire client 或 Python。
+  - 主 Agent 复跑（2026-09-02）：`npm --prefix web run lint` 通过；`type-check` 通过；`test -- src/composables src/domain` **83 passed**；`build` 通过；`git diff --check` 通过。
+- 用户已确认 0.2 变更计划。其余两项用户复现缺陷仍待后续卡：挂载仍会自动 create/attach，右侧仍有显式结束/重连/新建按钮（T09）；主区仍依赖页面根滚动（T10）。
+- T07 已验收。工作流 T01–T08 已完成；T09–T11 未开始。
   - scripted Web 旅程由既有 Vitest 覆盖，对照见 [acceptance.md](acceptance.md)；T07 仅补 App 级分页接线（`lists history and pages with the opaque next_cursor`）。
   - README Local runtime 说明侧边栏列出当前 workspace 可 resume session；点击先 DELETE 当前 transport session，再以 `resume_session_id` 创建；历史由有限 JSON 读取补齐，SSE 不 replay；单活跃 session；失败不自动重建；不提交 API Key。
   - 静态边界：`web/src` 无 `v-html`、无 Python import、仅 `client.ts` 调用 `fetch(`；localStorage 只经 `savePersistedTransportSession` 写 transport ID/cursor。T04 spec 曾把字面量 `v-html` 写进断言，导致既有 T10 全源码扫描失败；已改为 `'v-' + 'html'` 拼接，产品代码未使用该指令。
@@ -62,8 +70,7 @@
 
 ## Known Issues
 
-- **当前实现缺陷（待 T08）：** `resumeSession()` 把有限历史 envelopes 直接走 live `EVENT` reducer。若历史含旧 `agent_end`/`session_end(INTERRUPTED)`，reducer 会把刚创建的 resume transport 标为 closed 并清除持久化 ID；backend registry 中该 transport 仍 active，随后空 body create/“重新连接”会命中 `409 session_exists`。T08 必须隔离历史投影与 live 生命周期并守恒 POST 成功后的 transport 所有权。
-- **当前实现缺陷（待 T09）：** `App.vue` 默认 `autoConnect=true`，mount 后调用 `connect()`；没有 hint 时立即 `POST /sessions {}`，有 hint 时自动 attach。它与最新“首屏只选择、右侧空白”的产品语义冲突。右侧显式“结束 Session / 重新连接事件流 / 重新连接 / 新建 session”也须移除并归并到侧边栏操作。
+- **当前实现缺陷（待 T09）：** `App.vue` 默认 `autoConnect=true`，mount 后调用 `connect()`；没有 hint 时立即 `POST /sessions {}`，有 hint 时自动 attach。它与最新“首屏只选择、右侧空白”的产品语义冲突。右侧显式“结束 Session / 重新连接事件流 / 重新连接 / 新建 session”也须移除并归并到侧边栏操作。`createNewSession()` 已存在，但 UI 尚未接线。
 - **当前实现缺陷（待 T10）：** `.app-layout` 只设 `min-height:100vh`，右侧长内容通过 document/body 滚动；sidebar 虽有 `max-height:100vh; overflow:auto`，但仍处于随根页面移动的同一 flex 布局。需固定 viewport shell 并让左右容器独立 overflow。
 - **规划假设待用户确认：** 活跃 turn/等待授权时保留一次确认；确认后执行 replacement，取消则无副作用。用户若希望完全无确认切换，应在 T09 派发前更新架构/任务/决策。
 - 「切换 session」在 wire 上是「先 DELETE 当前、再 POST resume」的串行操作（单活跃 session 规则）；先终结后 resume 失败会导致当前 session 已终结且无活跃 session，须 fail-closed 提示新建，不自动重建（见 `ARCHITECTURE.md` §3.3、`DECISIONS.md`）。T02 状态核与 T05 App 接线均已覆盖该窗口：锁定侧边栏/composer、安全错误、新建入口。
@@ -76,4 +83,4 @@
 
 ## Next Recommended Task
 
-- T08 — 隔离历史 hydration 与 live transport 生命周期。T02/T07 已完成并有证据，因此依赖已就绪；但这是“等待用户确认”的计划门，确认前不得派发 subagent。T08 验收后再串行进入 T09，不并行实施。
+- T09 — 交付侧边栏驱动的 idle / 新建 / resume 交互。依赖 T04 与 T08 均已验收。按 T09 → T10 → T11 串行派发，不并行。

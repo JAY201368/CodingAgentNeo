@@ -376,4 +376,89 @@ describe('defensive event parser and reducer', () => {
     expect(state.resumeStateAmbiguous).toBe(false)
     expect(commandGateFor(state).kind).toBe('closed')
   })
+
+  it('keeps live connection open when historical terminal events hydrate', () => {
+    let state = reduceSession(createInitialSessionState(), {
+      type: 'CONNECTED',
+      transportSessionId: 'transport_live_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    const historical = [
+      {
+        ...fixture.events[0],
+        sequence: 1,
+        type: 'user_message',
+        payload: { text: 'inspect history' },
+      },
+      {
+        ...fixture.events[3],
+        sequence: 2,
+        type: 'turn_end',
+        payload: { state: 'INTERRUPTED', reason: 'user_cancelled', assistant_text: 'stopped' },
+      },
+      {
+        ...fixture.events[3],
+        sequence: 3,
+        type: 'agent_end',
+        payload: { state: 'INTERRUPTED', reason: 'user_cancelled' },
+      },
+      {
+        ...fixture.events[3],
+        sequence: 4,
+        type: 'session_end',
+        payload: { state: 'INTERRUPTED', reason: 'user_cancelled' },
+      },
+    ]
+    for (const event of historical) {
+      state = reduceSession(state, { type: 'HYDRATE_EVENT', event })
+    }
+
+    expect(state.connection).toBe('connected')
+    expect(state.transportSessionId).toBe('transport_live_1')
+    expect(state.cursor).toBe(4)
+    expect(state.status).toBe('RUNNING')
+    expect(state.events.map((event) => event.type)).toEqual([
+      'user_message',
+      'turn_end',
+      'agent_end',
+      'session_end',
+    ])
+    expect(state.finalAssistantText).toBe('stopped')
+    expect(commandGateFor(state).canSubmitTask).toBe(true)
+    expect(commandGateFor(state).kind).not.toBe('closed')
+  })
+
+  it('still closes the live transport on a live EVENT session_end', () => {
+    let state = reduceSession(createInitialSessionState(), {
+      type: 'CONNECTED',
+      transportSessionId: 'transport_live_1',
+      cursor: 0,
+      state: 'RUNNING',
+    })
+    state = reduceSession(state, {
+      type: 'HYDRATE_EVENT',
+      event: {
+        ...fixture.events[3],
+        sequence: 1,
+        type: 'session_end',
+        payload: { state: 'INTERRUPTED', reason: 'user_cancelled' },
+      },
+    })
+    expect(state.connection).toBe('connected')
+    expect(state.transportSessionId).toBe('transport_live_1')
+
+    state = reduceSession(state, {
+      type: 'EVENT',
+      event: {
+        ...fixture.events[3],
+        sequence: 2,
+        type: 'session_end',
+        payload: { state: 'INTERRUPTED', reason: 'user_cancelled' },
+      },
+    })
+    expect(state.connection).toBe('closed')
+    expect(state.transportSessionId).toBe('transport_live_1')
+    expect(commandGateFor(state).kind).toBe('closed')
+  })
 })

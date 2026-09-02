@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏需求
 
-> 状态：变更规划待确认（T01–T07 为历史已验收基线；T08–T11 尚未实施）
+> 状态：执行中（T01–T08 已验收；T09–T11 尚未实施）
 > 日期：2026-09-02
 > 依赖前序工作流：[../web-frontend/](../web-frontend/)（Web 前端 T01–T10 已交付）、[../backend-history-discover/](../backend-history-discover/)（后端与适配层历史/恢复能力 T01–T06 已交付）
 > Agent 适配层规范（前端唯一接入权威）：[../agent-transport-interface.md](../agent-transport-interface.md)
@@ -25,7 +25,7 @@
 4. session 创建、恢复和结束不再由右侧显式生命周期按钮控制。侧边栏上部提供一个小号圆形“新建 session”按钮；点击历史项或该按钮分别隐含执行“结束已知当前 transport → resume 目标”或“结束已知当前 transport → 创建新 session”。右侧移除“结束 Session”“重新连接”“新建 session”等显式 session 生命周期入口；SSE 仍可按既有有限策略自动重连，但不以右侧 session 按钮替代侧边栏选择模型。
 5. 活跃 turn/等待授权时的切换确认暂时保留为可逆规划假设：确认后仍执行同一 replacement，取消则不改变当前 session。该确认不是一个独立 session 生命周期入口。
 
-本轮先完成架构和任务卡修订；用户确认前不得派发 subagent 或修改产品代码。
+用户已于 2026-09-02 确认本变更计划；按 T08 → T09 → T10 → T11 串行实施。
 
 ## 需求澄清与本轮定位
 

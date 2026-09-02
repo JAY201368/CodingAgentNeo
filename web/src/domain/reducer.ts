@@ -64,6 +64,7 @@ export type SessionAction =
       readonly state: RuntimeState
     }
   | { readonly type: 'EVENT'; readonly event: unknown }
+  | { readonly type: 'HYDRATE_EVENT'; readonly event: unknown }
   | { readonly type: 'STREAM_OPENED' }
   | { readonly type: 'STREAM_ERROR'; readonly message: string }
   | { readonly type: 'STREAM_CLOSED' }
@@ -350,6 +351,31 @@ function reduceEvent(state: SessionState, input: unknown): SessionState {
   return applyKnownEvent(diagnosed, event)
 }
 
+/**
+ * Finite history hydration reuses the live parser, timeline facts, sequence
+ * cursor, and diagnostics. Historical agent_end / session_end / INTERRUPTED
+ * must not close the live connection, drop the POST-owned transport ID, or
+ * replace the live runtime state with a terminal snapshot.
+ */
+function reduceHydrateEvent(state: SessionState, input: unknown): SessionState {
+  const liveConnection = state.connection
+  const liveTransportSessionId = state.transportSessionId
+  const liveStatus = state.status
+  const liveStreamAvailable = state.streamAvailable
+  const liveStreamRetryExhausted = state.streamRetryExhausted
+  const reduced = reduceEvent(state, input)
+  return {
+    ...reduced,
+    connection: liveConnection,
+    transportSessionId: liveTransportSessionId,
+    streamAvailable: liveStreamAvailable,
+    streamRetryExhausted: liveStreamRetryExhausted,
+    status: isTerminalState(reduced.status) && !isTerminalState(liveStatus)
+      ? liveStatus
+      : reduced.status,
+  }
+}
+
 export function reduceSession(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
     case 'CONNECTING':
@@ -409,6 +435,8 @@ export function reduceSession(state: SessionState, action: SessionAction): Sessi
       }
     case 'EVENT':
       return reduceEvent(state, action.event)
+    case 'HYDRATE_EVENT':
+      return reduceHydrateEvent(state, action.event)
     case 'STREAM_OPENED':
       return state.connection === 'closed'
         ? state

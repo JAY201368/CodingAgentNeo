@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Change plan pending confirmation（T01–T07 已验收；T08–T11 未实施，用户确认前不得派发）
+> 状态：Executing 0.2 change（T01–T08 已验收；T09–T11 未实施）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -156,7 +156,7 @@ flowchart TD
 
 ## 阶段 E：session replacement 状态机纠偏
 
-### [ ] T08 — 隔离历史 hydration 与 live transport 生命周期
+### [x] T08 — 隔离历史 hydration 与 live transport 生命周期
 
 **依赖：** T02, T07
 **范围：** 在 `web/src/composables/useAgentSession.ts`、必要的 `web/src/domain/reducer.ts` 及对应测试中，拆开原 `connect()` 混合的 attach/create/reconnect 职责，新增一个受共享 lifecycle 锁保护的显式新建操作（建议内部接口 `createNewSession()`），并修正 `resumeSession()` 的 hydration 边界。新建和 resume 都按「停止 SSE → DELETE 前端已知当前 transport（404/410 幂等）→ 清空旧投影 → 唯一一次 POST → 登记新 transport → 启动/恢复 live SSE」执行。历史 envelopes 仍复用安全解析和 timeline 投影，但历史 `agent_end`/`session_end`/`INTERRUPTED` 不得关闭、遗忘或覆盖刚创建的 live transport。排除 App/侧边栏 UI 与 CSS；不改 wire client、Python 或 transport 规范。
@@ -172,6 +172,8 @@ flowchart TD
 **排除：** 不修改 `App.vue`、`HistorySidebar.vue`、布局样式、右侧按钮或首次挂载行为；不发明新 action/wire 字段，不把有限 history GET 改成第二条 SSE。
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/composables src/domain`；`npm --prefix web run build`；`git diff --check`。
+
+**完成摘要（2026-09-02）：** 新增 `createNewSession()`，与 `resumeSession()` 共用 `lifecycleBusy` 锁；已知 transport（含未 attach 的持久化 hint）先 DELETE 再唯一 POST。历史 envelopes 走 `HYDRATE_EVENT`：旧 `session_end`/`INTERRUPTED` 只重建 timeline，不关闭或遗忘新 live transport。POST 成功后所有权守恒。主 Agent 复跑 lint/type-check/`test -- src/composables src/domain`（83 passed）/build/`git diff --check` 通过。未改 App/侧边栏/CSS。
 
 ### [ ] T09 — 交付侧边栏驱动的 idle / 新建 / resume 交互
 
@@ -227,4 +229,4 @@ flowchart TD
 
 ## 推荐顺序
 
-T01–T07 保留为已验收历史。用户确认本变更计划后，按 T08 → T09 → T10 → T11 串行执行；每张卡使用全新专用 subagent，主 Agent 独立验收后才勾选。当前最早 dependency-ready 的卡是 T08，但用户确认前不得派发。
+T01–T08 已验收。继续按 T09 → T10 → T11 串行执行；每张卡使用全新专用 subagent，主 Agent 独立验收后才勾选。当前最早 dependency-ready 的卡是 T09。

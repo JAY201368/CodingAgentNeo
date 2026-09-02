@@ -103,3 +103,9 @@
 - 选择：新建和 resume 共用串行 lifecycle 锁，均先 DELETE 前端已知当前 transport，再执行各自唯一 POST；session 控制入口只存在于侧边栏。桌面根布局固定于 viewport，sidebar 与主区分别纵向滚动。
 - 理由与替代：仅让 resume 先 DELETE 而新建直接 POST 会在持久化 hint 或失败残留下重复出现 409；继续保留右侧生命周期按钮会让状态转换入口分散。document/body 主滚动又会让侧栏随右栏长消息移动，违背导航常驻预期。
 - 后果：T08 先稳定统一 replacement，T09 再改入口，T10 最后改滚动/视觉，T11 聚合验收。活跃 turn 的一次确认暂时保留为可逆假设；用户确认计划前不实施、不派发 subagent。
+
+## 2026-09-02 — T08：历史 hydration 走 `HYDRATE_EVENT`，live 生命周期仍只认 `EVENT`
+
+- 选择：reducer 新增 `HYDRATE_EVENT`。它复用同一套 envelope 解析、timeline 追加、sequence 幂等/跳号诊断；但保留 live `connection` / `transportSessionId` / `streamAvailable`，并且若历史事件把 `status` 推进到 `INTERRUPTED`/`FAILED`/`LIMIT_REACHED`，则恢复 hydration 前的 live status。`useAgentSession.dispatch` 只在 live `EVENT` 的 `session_end` 关闭时清除持久化 hint。`createNewSession()` 与 `resumeSession()` 共用 `lifecycleBusy` 锁；`switching` 为其布尔派生。已知 transport 取 `state.transportSessionId ?? storedHint.transportSessionId`。既有 `connect()` 保留给 App 挂载，直到 T09。
+- 理由与替代：把历史 envelopes 再编码后走 live `EVENT` 会让旧 `session_end` 关闭刚 POST 出的 transport 并清掉 ID。独立第二套 timeline 会复制解析与降级规则。仅在 composable 里忽略 `session_end` 仍会让 `agent_end`/`INTERRUPTED` 把 command gate 打进终止态，follow-up 失败。带来源的 reducer action 是最小隔离。
+- 后果：此条落实 2026-09-02 “历史投影不能控制新 resume transport 生命周期”。hydration 失败或 SSE 断线不再是遗忘 transport ID 的证据。T09 可把侧边栏新建/选择接到 `createNewSession`/`resumeSession`，但不得再让历史 `EVENT` 驱动 live 关闭。

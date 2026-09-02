@@ -103,6 +103,55 @@ function historyTurnEvents(): Record<string, unknown>[] {
   ]
 }
 
+function historyInterruptedEvents(): Record<string, unknown>[] {
+  return [
+    {
+      ...fixture.events[0],
+      sequence: 1,
+      type: 'session_start',
+      payload: { state: 'RUNNING' },
+    },
+    {
+      ...fixture.events[0],
+      event_id: 'event_user_interrupted',
+      sequence: 2,
+      type: 'user_message',
+      payload: { text: 'inspect then stop' },
+    },
+    {
+      ...fixture.events[1],
+      sequence: 3,
+      type: 'assistant_message',
+      payload: { text: 'working' },
+    },
+    {
+      ...fixture.events[3],
+      sequence: 4,
+      type: 'turn_end',
+      payload: {
+        state: 'INTERRUPTED',
+        reason: 'user_cancelled',
+        assistant_text: 'working',
+        budget: {},
+      },
+    },
+    {
+      ...fixture.events[3],
+      event_id: 'event_agent_end',
+      sequence: 5,
+      type: 'agent_end',
+      payload: { state: 'INTERRUPTED', reason: 'user_cancelled', budget: {} },
+    },
+    {
+      ...fixture.events[3],
+      event_id: 'event_session_end',
+      sequence: 6,
+      type: 'session_end',
+      payload: { state: 'INTERRUPTED', reason: 'user_cancelled', budget: {} },
+    },
+  ]
+}
+
 function historyPage(
   events: readonly Record<string, unknown>[],
   options: { hasMore?: boolean; nextCursor?: number | null } = {},
@@ -1110,6 +1159,534 @@ describe('useAgentSession', () => {
       expect(paths.some((path) => path.includes(`/sessions/${HISTORY_SESSION_ID}`))).toBe(false)
       expect(paths.some((path) => path.includes('/session-history/transport_'))).toBe(false)
       session.stopEvents()
+    })
+
+    it('keeps the new live transport connected after historical INTERRUPTED terminal events', async () => {
+      const storage = new MemoryStorage()
+      const calls: Array<{ method: string; path: string; body: unknown }> = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : null
+        calls.push({ method, path, body })
+        if (path.endsWith('/sessions') && method === 'POST') {
+          const record = body !== null && typeof body === 'object' ? body as Record<string, unknown> : {}
+          if (record.resume_session_id === HISTORY_SESSION_ID) {
+            return response({
+              transport_session_id: RESUMED_TRANSPORT_ID,
+              state: 'RUNNING',
+              cursor: 6,
+            }, 201)
+          }
+          return response({
+            transport_session_id: 'transport_live',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (method === 'DELETE') {
+          return new Response(null, { status: 204 })
+        }
+        if (path.includes('/session-history/')) {
+          return response(historyPage(historyInterruptedEvents()))
+        }
+        if (path.includes(`/${RESUMED_TRANSPORT_ID}/events`)) {
+          return openStreamResponse()
+        }
+        if (path.endsWith('/commands') && method === 'POST') {
+          return response({ accepted: true }, 202)
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage,
+        autoStartEvents: false,
+        reconnect: { maxAttempts: 0 },
+      })
+      await session.connect()
+      await session.resumeSession(HISTORY_SESSION_ID)
+      await later()
+
+      expect(session.state.value.connection).toBe('connected')
+      expect(session.transportSessionId.value).toBe(RESUMED_TRANSPORT_ID)
+      expect(session.cursor.value).toBe(6)
+      expect(session.state.value.events.map((event) => event.type)).toEqual([
+        'session_start',
+        'user_message',
+        'assistant_message',
+        'turn_end',
+        'agent_end',
+        'session_end',
+      ])
+      const timeline = projectTimeline(session.state.value.events)
+      expect(timeline.some((item) => item.kind === 'end' && item.title === 'Session 结束')).toBe(true)
+      expect(session.gate.value.canSubmitTask).toBe(true)
+      expect(storedHint(storage)).toEqual({ transportSessionId: RESUMED_TRANSPORT_ID, cursor: 6 })
+
+      await session.submitTask('follow-up')
+      expect(calls.at(-1)?.path).toContain(`/sessions/${RESUMED_TRANSPORT_ID}/commands`)
+      session.stopEvents()
+    })
+  })
+
+  describe('createNewSession and shared replacement', () => {
+    it('deletes the known transport then POSTs an empty create body once', async () => {
+      const storage = new MemoryStorage()
+      const calls: Array<{ method: string; path: string; body: unknown }> = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : null
+        calls.push({ method, path, body })
+        if (path.endsWith('/sessions') && method === 'POST') {
+          const record = body !== null && typeof body === 'object' ? body as Record<string, unknown> : {}
+          expect(record).not.toHaveProperty('resume_session_id')
+          return response({
+            transport_session_id: calls.some((call) => call.method === 'DELETE')
+              ? 'transport_created_2'
+              : 'transport_live',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (path.endsWith('/sessions/transport_live') && method === 'DELETE') {
+          return new Response(null, { status: 204 })
+        }
+        if (path.includes('/events')) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage,
+        autoStartEvents: false,
+        reconnect: { maxAttempts: 0 },
+      })
+      await session.connect()
+      await session.createNewSession()
+      await later()
+
+      expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+        'POST /api/v1/sessions',
+        'DELETE /api/v1/sessions/transport_live',
+        'POST /api/v1/sessions',
+        'GET /api/v1/sessions/transport_created_2/events?since=0',
+      ])
+      expect(calls[2].body).toEqual({})
+      expect(session.transportSessionId.value).toBe('transport_created_2')
+      expect(session.state.value.connection).toBe('connected')
+      expect(session.state.value.events).toEqual([])
+      expect(storedHint(storage)).toEqual({ transportSessionId: 'transport_created_2', cursor: 0 })
+      expect(session.lifecycleBusy.value).toBeNull()
+      expect(session.switching.value).toBe(false)
+      session.stopEvents()
+    })
+
+    it('skips DELETE when there is no known transport and still POSTs once', async () => {
+      const methods: string[] = []
+      const bodies: unknown[] = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        methods.push(method)
+        if (path.endsWith('/sessions') && method === 'POST') {
+          bodies.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null)
+          return response({
+            transport_session_id: 'transport_created_1',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (path.includes('/events')) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage: null,
+        reconnect: { maxAttempts: 0 },
+      })
+
+      await session.createNewSession()
+      await later()
+
+      expect(methods).not.toContain('DELETE')
+      expect(bodies).toEqual([{}])
+      expect(session.transportSessionId.value).toBe('transport_created_1')
+      session.stopEvents()
+    })
+
+    it('deletes a persisted hint that has not been attached before creating', async () => {
+      const storage = new MemoryStorage()
+      storage.setItem(
+        'coding-agent-neo.transport-session',
+        JSON.stringify({ transportSessionId: 'transport_hint_only', cursor: 9 }),
+      )
+      const calls: Array<{ method: string; path: string; body: unknown }> = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : null
+        calls.push({ method, path, body })
+        if (path.endsWith('/sessions/transport_hint_only') && method === 'DELETE') {
+          return new Response(null, { status: 204 })
+        }
+        if (path.endsWith('/sessions') && method === 'POST') {
+          expect(body).toEqual({})
+          return response({
+            transport_session_id: 'transport_created_after_hint',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (path.includes('/events')) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage,
+        autoStartEvents: false,
+        reconnect: { maxAttempts: 0 },
+      })
+      expect(session.state.value.connection).toBe('disconnected')
+
+      await session.createNewSession()
+      await later()
+
+      expect(calls[0]).toEqual({
+        method: 'DELETE',
+        path: '/api/v1/sessions/transport_hint_only',
+        body: null,
+      })
+      expect(calls.some((call) => call.path.endsWith('/transport_hint_only') && call.method === 'GET')).toBe(false)
+      expect(session.transportSessionId.value).toBe('transport_created_after_hint')
+      expect(storedHint(storage)).toEqual({
+        transportSessionId: 'transport_created_after_hint',
+        cursor: 0,
+      })
+      session.stopEvents()
+    })
+
+    it('cleans a persisted hint before resume without attaching it', async () => {
+      const storage = new MemoryStorage()
+      storage.setItem(
+        'coding-agent-neo.transport-session',
+        JSON.stringify({ transportSessionId: 'transport_hint_only', cursor: 3 }),
+      )
+      const methods: string[] = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        methods.push(`${method} ${path}`)
+        if (path.endsWith('/sessions/transport_hint_only') && method === 'DELETE') {
+          return response({ error: { code: 'session_not_found', message: 'private' } }, 404)
+        }
+        if (path.endsWith('/sessions') && method === 'POST') {
+          return response({
+            transport_session_id: RESUMED_TRANSPORT_ID,
+            state: 'RUNNING',
+            cursor: 4,
+          }, 201)
+        }
+        if (path.includes('/session-history/')) {
+          return response(historyPage(historyTurnEvents()))
+        }
+        if (path.includes(`/${RESUMED_TRANSPORT_ID}/events`)) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage,
+        reconnect: { maxAttempts: 0 },
+      })
+
+      await session.resumeSession(HISTORY_SESSION_ID)
+      await later()
+
+      expect(methods[0]).toBe('DELETE /api/v1/sessions/transport_hint_only')
+      expect(methods.some((line) => line.startsWith('GET /api/v1/sessions/transport_hint_only'))).toBe(false)
+      expect(session.transportSessionId.value).toBe(RESUMED_TRANSPORT_ID)
+      session.stopEvents()
+    })
+
+    it('keeps transport ownership when hydration fails and deletes it on the next replacement', async () => {
+      const storage = new MemoryStorage()
+      let resumePosts = 0
+      let createPosts = 0
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
+        if (path.endsWith('/sessions') && method === 'POST') {
+          if (body.resume_session_id === HISTORY_SESSION_ID) {
+            resumePosts += 1
+            return response({
+              transport_session_id: RESUMED_TRANSPORT_ID,
+              state: 'RUNNING',
+              cursor: 4,
+            }, 201)
+          }
+          createPosts += 1
+          return response({
+            transport_session_id: createPosts === 1 ? 'transport_live' : 'transport_created_after_failure',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (method === 'DELETE') {
+          return new Response(null, { status: 204 })
+        }
+        if (path.includes('/session-history/')) {
+          throw new AgentNetworkError('history read failed')
+        }
+        if (path.includes('/events')) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage,
+        autoStartEvents: false,
+        reconnect: { maxAttempts: 0 },
+      })
+      await session.connect()
+
+      await expect(session.resumeSession(HISTORY_SESSION_ID)).rejects.toBeInstanceOf(AgentNetworkError)
+      expect(session.transportSessionId.value).toBe(RESUMED_TRANSPORT_ID)
+      expect(session.state.value.connection).toBe('connected')
+      expect(storedHint(storage)).toEqual({ transportSessionId: RESUMED_TRANSPORT_ID, cursor: 0 })
+      expect(resumePosts).toBe(1)
+
+      await session.createNewSession()
+      await later()
+
+      const deleted = fetchImpl.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'DELETE')
+      expect(deleted.some((call) => String(call[0]).endsWith(`/sessions/${RESUMED_TRANSPORT_ID}`))).toBe(true)
+      expect(session.transportSessionId.value).toBe('transport_created_after_failure')
+      expect(resumePosts).toBe(1)
+      session.stopEvents()
+    })
+
+    it('can replace again after a successful resume without mixing history and transport IDs', async () => {
+      const storage = new MemoryStorage()
+      const calls: Array<{ method: string; path: string }> = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        calls.push({ method, path })
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
+        if (path.endsWith('/sessions') && method === 'POST') {
+          if (body.resume_session_id === HISTORY_SESSION_ID) {
+            return response({
+              transport_session_id: RESUMED_TRANSPORT_ID,
+              state: 'RUNNING',
+              cursor: 4,
+            }, 201)
+          }
+          return response({
+            transport_session_id: path && calls.some((call) => call.method === 'DELETE' && call.path.includes(RESUMED_TRANSPORT_ID))
+              ? 'transport_created_3'
+              : 'transport_live',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (method === 'DELETE') {
+          expect(path).not.toContain(HISTORY_SESSION_ID)
+          return new Response(null, { status: 204 })
+        }
+        if (path.includes('/session-history/')) {
+          expect(path).not.toContain('transport_')
+          return response(historyPage(historyInterruptedEvents()))
+        }
+        if (path.includes('/events')) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage,
+        autoStartEvents: false,
+        reconnect: { maxAttempts: 0 },
+      })
+      await session.connect()
+      await session.resumeSession(HISTORY_SESSION_ID)
+      await later()
+      expect(session.transportSessionId.value).toBe(RESUMED_TRANSPORT_ID)
+
+      await session.createNewSession()
+      await later()
+
+      expect(calls.some((call) => call.method === 'DELETE' && call.path.endsWith(`/sessions/${RESUMED_TRANSPORT_ID}`)))
+        .toBe(true)
+      expect(session.transportSessionId.value).toBe('transport_created_3')
+      expect(session.state.value.connection).toBe('connected')
+      expect(storedHint(storage)).toEqual({ transportSessionId: 'transport_created_3', cursor: 0 })
+      session.stopEvents()
+    })
+
+    it('shares one lock so concurrent create and resume produce a single lifecycle POST', async () => {
+      let releaseDelete: (() => void) | undefined
+      const deleteGate = new Promise<void>((resolve) => {
+        releaseDelete = resolve
+      })
+      const sessionPosts: unknown[] = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        if (path.endsWith('/sessions') && method === 'POST') {
+          const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : null
+          sessionPosts.push(body)
+          return response({
+            transport_session_id: sessionPosts.length === 1 ? 'transport_live' : 'transport_created_lock',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (method === 'DELETE') {
+          await deleteGate
+          return new Response(null, { status: 204 })
+        }
+        if (path.includes('/events')) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage: null,
+        autoStartEvents: false,
+        reconnect: { maxAttempts: 0 },
+      })
+      await session.connect()
+
+      const first = session.createNewSession()
+      await later()
+      expect(session.switching.value).toBe(true)
+      expect(session.lifecycleBusy.value).toBe('create')
+      await expect(session.resumeSession(HISTORY_SESSION_ID)).rejects.toBeInstanceOf(SessionCommandError)
+      await expect(session.createNewSession()).rejects.toBeInstanceOf(SessionCommandError)
+      releaseDelete?.()
+      await first
+      await later()
+
+      expect(sessionPosts).toEqual([{}, {}])
+      expect(session.lifecycleBusy.value).toBeNull()
+      expect(session.transportSessionId.value).toBe('transport_created_lock')
+      session.stopEvents()
+    })
+
+    it('does not POST create when DELETE cannot prove the known transport closed', async () => {
+      const storage = new MemoryStorage()
+      storage.setItem(
+        'coding-agent-neo.transport-session',
+        JSON.stringify({ transportSessionId: 'transport_hint_only', cursor: 1 }),
+      )
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (method === 'DELETE') {
+          throw new AgentNetworkError('connection lost')
+        }
+        throw new Error(`unexpected request: ${method} ${String(input)}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage,
+        autoStartEvents: false,
+      })
+
+      await expect(session.createNewSession()).rejects.toBeInstanceOf(AgentNetworkError)
+      expect(fetchImpl.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'POST'))
+        .toHaveLength(0)
+      expect(session.transportSessionId.value).toBe('transport_hint_only')
+      expect(session.state.value.lastError).toBe('connection lost')
+      expect(session.switching.value).toBe(false)
+    })
+
+    it.each([404, 410])('treats create DELETE %s as already closed and continues', async (status) => {
+      const methods: string[] = []
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        methods.push(`${method} ${path}`)
+        if (path.endsWith('/sessions') && method === 'POST') {
+          return response({
+            transport_session_id: methods.some((line) => line.startsWith('DELETE '))
+              ? 'transport_created_after_gone'
+              : 'transport_stale',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (path.endsWith('/sessions/transport_stale') && method === 'DELETE') {
+          return response({
+            error: { code: status === 410 ? 'session_closed' : 'session_not_found', message: 'private' },
+          }, status)
+        }
+        if (path.includes('/events')) {
+          return openStreamResponse()
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage: null,
+        autoStartEvents: false,
+        reconnect: { maxAttempts: 0 },
+      })
+      await session.connect()
+      await session.createNewSession()
+      await later()
+
+      expect(methods.some((line) => line.startsWith('DELETE '))).toBe(true)
+      expect(session.transportSessionId.value).toBe('transport_created_after_gone')
+      session.stopEvents()
+    })
+
+    it('does not replay POST after a create network failure', async () => {
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        const method = init?.method ?? 'GET'
+        if (path.endsWith('/sessions') && method === 'POST') {
+          if (fetchImpl.mock.calls.some((call) => (call[1] as RequestInit | undefined)?.method === 'DELETE')) {
+            throw new AgentNetworkError('connection lost')
+          }
+          return response({
+            transport_session_id: 'transport_live',
+            state: 'RUNNING',
+            cursor: 0,
+          }, 201)
+        }
+        if (method === 'DELETE') {
+          return new Response(null, { status: 204 })
+        }
+        throw new Error(`unexpected request: ${method} ${path}`)
+      })
+      const session = useAgentSession({
+        client: new AgentHttpClient({ fetchImpl }),
+        storage: null,
+        autoStartEvents: false,
+      })
+      await session.connect()
+
+      await expect(session.createNewSession()).rejects.toBeInstanceOf(AgentNetworkError)
+      const createPosts = fetchImpl.mock.calls.filter((call) => {
+        const path = String(call[0])
+        const init = call[1] as RequestInit | undefined
+        return path.endsWith('/sessions') && init?.method === 'POST'
+      })
+      expect(createPosts).toHaveLength(2)
+      expect(session.transportSessionId.value).toBeNull()
+      expect(session.state.value.connection).toBe('error')
     })
   })
 })
