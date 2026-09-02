@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Complete（T01–T07 已验收）
+> 状态：Change plan pending confirmation（T01–T07 已验收；T08–T11 未实施，用户确认前不得派发）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -22,6 +22,12 @@ flowchart TD
   T04 --> T05
   T05 --> T06
   T06 --> T07
+  T02 --> T08
+  T07 --> T08
+  T04 --> T09
+  T08 --> T09
+  T09 --> T10
+  T10 --> T11
 ```
 
 ## 阶段 A：历史 wire 客户端与领域解析
@@ -148,6 +154,77 @@ flowchart TD
 
 **完成摘要（2026-09-02）：** 对照表见 `acceptance.md`；README 写明侧边栏先 DELETE 再 resume，并删除过时的「no server-restart Web resume」。主 Agent 复跑 Web lint/type-check/`test`（124 passed）/build 通过；acceptance **59 passed**；workflow validator（webgui-history-sidebar/web-frontend/backend-history-discover/baseline）通过。全量 pytest **346 passed / 1 failed**：`test_main_corrupt_session_is_startup_failure` 因本机 ignored 配置含未知选项返回 EXIT_CONFIG(2)；`CODING_AGENT_NEO_CONFIG` 指向不存在文件后该用例通过。未跑真实模型/真实浏览器 resume。
 
+## 阶段 E：session replacement 状态机纠偏
+
+### [ ] T08 — 隔离历史 hydration 与 live transport 生命周期
+
+**依赖：** T02, T07
+**范围：** 在 `web/src/composables/useAgentSession.ts`、必要的 `web/src/domain/reducer.ts` 及对应测试中，拆开原 `connect()` 混合的 attach/create/reconnect 职责，新增一个受共享 lifecycle 锁保护的显式新建操作（建议内部接口 `createNewSession()`），并修正 `resumeSession()` 的 hydration 边界。新建和 resume 都按「停止 SSE → DELETE 前端已知当前 transport（404/410 幂等）→ 清空旧投影 → 唯一一次 POST → 登记新 transport → 启动/恢复 live SSE」执行。历史 envelopes 仍复用安全解析和 timeline 投影，但历史 `agent_end`/`session_end`/`INTERRUPTED` 不得关闭、遗忘或覆盖刚创建的 live transport。排除 App/侧边栏 UI 与 CSS；不改 wire client、Python 或 transport 规范。
+
+**验收：**
+
+- `createNewSession()` 和 `resumeSession()` 共用一个不可重入锁；并发点击最多产生一个 lifecycle POST，POST 永不自动重放。
+- 两条路径都先 DELETE 已知 transport（包括只来自持久化 hint、尚未 attach 的 transport）再 POST；DELETE 网络失败时不 POST，404/410 后继续。无已知 transport 时直接执行各自唯一 POST。
+- resume POST 成功后立即保留新 `transport_session_id`；hydration 输入包含旧 `turn_end(INTERRUPTED)`、`agent_end`、`session_end` 时，timeline 可还原这些历史事实，但 live connection 仍为 connected、新 transport ID/cursor 可用于 SSE 与 follow-up。
+- hydration 或 live SSE 失败不得造成“后端仍 active、前端却丢失 transport ID”的幽灵 session；下一次 create/resume 仍能先 DELETE 前端持有的 transport，避免由本前端遗忘身份导致 `409 session_exists`。
+- direct composable 测试覆盖：新建 replacement、resume replacement、持久化 hint 清理、历史 terminal event 隔离、hydration 失败所有权守恒、再次 replacement、锁与错误分支；history ID 与 transport ID 不混用。
+
+**排除：** 不修改 `App.vue`、`HistorySidebar.vue`、布局样式、右侧按钮或首次挂载行为；不发明新 action/wire 字段，不把有限 history GET 改成第二条 SSE。
+
+**验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/composables src/domain`；`npm --prefix web run build`；`git diff --check`。
+
+### [ ] T09 — 交付侧边栏驱动的 idle / 新建 / resume 交互
+
+**依赖：** T04, T08
+**范围：** 修改 `web/src/App.vue`、`web/src/components/HistorySidebar.vue` 及对应测试：首次挂载只加载历史列表，右侧保持空白且不自动 create/attach/SSE；在侧边栏上部加入小号圆形新建按钮并 emit `create`；历史项 emit `select`。App 将两者接到 T08 的统一 lifecycle controller，移除右侧所有显式 session 新建、重新连接、事件流重连和结束按钮/入口。保留自动 SSE 有限重试和活跃 turn/等待授权的一次确认假设。排除独立滚动与最终视觉几何（T10）。
+
+**验收：**
+
+- 首次 mount 可发历史列表 GET，但在用户动作前 `POST /sessions`、`GET /sessions/{id}` attach、live SSE、DELETE 均为 0；即使 localStorage 有 transport hint 也不自动 attach。右侧不显示“尚未连接”“当前 Session 已结束/中断”或 session 控制卡，保持空白。
+- 侧边栏上部有可见、键盘可达、具 `aria-label="新建 session"` 的小号圆形按钮；点击后调用唯一的新建 replacement，成功显示空会话/composer 并清除历史当前项。
+- 点击可恢复历史项调用唯一的 resume replacement；有现存/持久化 transport 时先 DELETE 后 resume。包含历史 `session_end(INTERRUPTED)` 的目标成功后仍显示历史消息、composer 可 follow-up，不显示伪“连接已中断”入口。
+- 主区不存在“结束 Session”“重新连接事件流”“重新连接”“新建 session”等显式 lifecycle 按钮；安全错误可展示，但恢复路径只通过侧边栏新建或历史选择。
+- create/resume 期间圆形按钮、历史选择和 composer 同时禁用，并显示与操作相符的可访问状态；活跃 turn 确认取消时不 DELETE/POST，确认后走同一 replacement。
+- App/组件测试不再预先依赖自动创建；明确断言首屏零 session 副作用、按钮/选择调用顺序、历史 terminal 回归、无旧控制入口和窄屏抽屉基本行为。
+
+**排除：** 不改 wire/后端，不用右侧按钮作为 fallback，不实现 sidebar/main 独立滚动或最终尺寸样式。
+
+**验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test -- src/App.spec.ts src/components`；`npm --prefix web run build`；`git diff --check`。
+
+## 阶段 F：独立滚动、视觉与变更验收
+
+### [ ] T10 — 固定 viewport shell 并隔离左右滚动
+
+**依赖：** T09
+**范围：** 在 `web/src/style.css` 及必要的 App/组件样式测试中，把桌面布局改成固定 viewport shell：sidebar 与 `.app-main`/主消息区各自拥有纵向 overflow，body/document 不再承载会话长内容的主滚动；完成圆形新建按钮的紧凑紫金视觉。保持 ≤640px overlay 抽屉、composer、焦点、inert、Escape、reduced-motion 与对比度行为。只做布局、视觉和可访问性，不改 session 状态机。
+
+**验收：**
+
+- 桌面 1280×800 长历史/长消息场景中，滚动右侧时 sidebar 的 bounding rect 与 `scrollTop` 不变；滚动 sidebar 时右侧 `scrollTop` 不变。左右均能到达各自末尾，页面无双滚动条或横向溢出。
+- 标题和圆形新建按钮位于 sidebar 上部；按钮视觉为小号圆形（非占满宽度），有可见 focus、disabled/busy 状态，不能只靠颜色传达状态。
+- composer 在右侧容器内保持可用且不覆盖最后消息；桌面/360px 均无横向溢出。窄屏 sidebar 仍为 overlay 抽屉，关闭时 inert，打开后自身可滚动，Escape/遮罩关闭且焦点返回。
+- 普通文本/控件继续达到 WCAG 2.2 AA，reduced-motion 生效；记录真实浏览器尺寸、scrollTop/bounding rect 证据、发现与修正。
+
+**排除：** 不修改 composable/reducer/wire，不新增 UI 框架、Router、Pinia 或装饰动画。
+
+**验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test`；`npm --prefix web run build`；真实浏览器 1280×800 与 360×640 独立滚动/键盘/reduced-motion/对比度检查；`git diff --check`。
+
+### [ ] T11 — 聚合回归四个纠偏旅程并同步交付文档
+
+**依赖：** T10
+**范围：** 更新 `docs/webgui-history-sidebar/acceptance.md`、必要的 `web/` 聚合测试、`tests/acceptance/test_webgui_history_sidebar_acceptance.py` 与 `README.md`，把 T08–T10 的可观察旅程加入脚本化验收和运行说明；复跑相称 Web/Python/workflow 门并核对 secret、生成物、依赖边界。只修复 T08–T10 引入的集成缺陷，不新增产品能力或后端契约。
+
+**验收：**
+
+- 聚合证据覆盖：首屏零 session 副作用且右侧空白；侧边栏新建；已有 transport 下历史 replacement；旧 `session_end(INTERRUPTED)` 不毒化新 transport；恢复后 follow-up；再次 replacement 不出现由前端幽灵 transport 导致的 409；左右独立滚动；主区无显式 lifecycle 按钮。
+- README 明确“打开 GUI 只列历史；从侧边栏选择或新建”“replacement 先 DELETE 已知 transport”“history terminal 只属历史投影”“左右独立滚动”；删除自动创建和右侧手动结束/重连的过时说明。
+- 静态边界继续确认：只经 client 发网络请求，不持久化 history ID，不使用 `v-html`，不改 Python/wire 业务实现，不提交 API Key、真实 session、私有路径、dist/node_modules/coverage。
+- Web lint/type/test/build、Python acceptance、workflow validator 通过；Python 全量回归通过或如实记录与本变更无关的既有环境失败。架构、任务、进度、决策与 acceptance 描述同一真实状态。
+
+**排除：** 不以 fake 声称真实模型或真实公网；不顺手修复无关 Python/local config 问题。
+
+**验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test`；`npm --prefix web run build`；`.venv/bin/python -m pytest tests/acceptance -m acceptance`；`.venv/bin/python -m pytest`；`python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/webgui-history-sidebar`；secret/生成物/依赖扫描；`git diff --check`。
+
 ## 推荐顺序
 
-先做 T01 稳定历史/恢复 wire client 与 DTO；随后 T02（恢复旅程状态核）与 T03（列表 composable）都只依赖 T01，一次仍只派发一个，建议先 T02 再 T03；T04 依赖 T03 交付侧边栏视图；T05 在 T02+T04 汇合完成布局与接线；最后 T06 视觉/可访问性、T07 验收与回归门。
+T01–T07 保留为已验收历史。用户确认本变更计划后，按 T08 → T09 → T10 → T11 串行执行；每张卡使用全新专用 subagent，主 Agent 独立验收后才勾选。当前最早 dependency-ready 的卡是 T08，但用户确认前不得派发。

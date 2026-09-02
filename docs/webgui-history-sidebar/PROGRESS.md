@@ -12,6 +12,8 @@
 
 ## Current State
 
+- 2026-09-02 change-control 规划已形成，等待用户确认；尚未派发 subagent，尚未修改 `web/` 产品代码。T01–T07 仍是历史已验收基线，T08–T11 均未开始。
+- 当前代码仍存在用户复现的四项缺陷：挂载会自动创建/attach session；主区依赖页面根滚动而带动侧栏；历史 hydration 的旧 `session_end` 会污染新 resume transport 的 live 状态并可遗忘其 ID、诱发后续 `409 session_exists`；右侧仍有显式结束/重连/新建按钮。规划修复顺序为 T08 状态核 → T09 侧边栏交互 → T10 独立滚动 → T11 聚合验收。
 - T07 已验收。工作流 T01–T07 全部完成。
   - scripted Web 旅程由既有 Vitest 覆盖，对照见 [acceptance.md](acceptance.md)；T07 仅补 App 级分页接线（`lists history and pages with the opaque next_cursor`）。
   - README Local runtime 说明侧边栏列出当前 workspace 可 resume session；点击先 DELETE 当前 transport session，再以 `resume_session_id` 创建；历史由有限 JSON 读取补齐，SSE 不 replay；单活跃 session；失败不自动重建；不提交 API Key。
@@ -60,6 +62,10 @@
 
 ## Known Issues
 
+- **当前实现缺陷（待 T08）：** `resumeSession()` 把有限历史 envelopes 直接走 live `EVENT` reducer。若历史含旧 `agent_end`/`session_end(INTERRUPTED)`，reducer 会把刚创建的 resume transport 标为 closed 并清除持久化 ID；backend registry 中该 transport 仍 active，随后空 body create/“重新连接”会命中 `409 session_exists`。T08 必须隔离历史投影与 live 生命周期并守恒 POST 成功后的 transport 所有权。
+- **当前实现缺陷（待 T09）：** `App.vue` 默认 `autoConnect=true`，mount 后调用 `connect()`；没有 hint 时立即 `POST /sessions {}`，有 hint 时自动 attach。它与最新“首屏只选择、右侧空白”的产品语义冲突。右侧显式“结束 Session / 重新连接事件流 / 重新连接 / 新建 session”也须移除并归并到侧边栏操作。
+- **当前实现缺陷（待 T10）：** `.app-layout` 只设 `min-height:100vh`，右侧长内容通过 document/body 滚动；sidebar 虽有 `max-height:100vh; overflow:auto`，但仍处于随根页面移动的同一 flex 布局。需固定 viewport shell 并让左右容器独立 overflow。
+- **规划假设待用户确认：** 活跃 turn/等待授权时保留一次确认；确认后执行 replacement，取消则无副作用。用户若希望完全无确认切换，应在 T09 派发前更新架构/任务/决策。
 - 「切换 session」在 wire 上是「先 DELETE 当前、再 POST resume」的串行操作（单活跃 session 规则）；先终结后 resume 失败会导致当前 session 已终结且无活跃 session，须 fail-closed 提示新建，不自动重建（见 `ARCHITECTURE.md` §3.3、`DECISIONS.md`）。T02 状态核与 T05 App 接线均已覆盖该窗口：锁定侧边栏/composer、安全错误、新建入口。
 - resume + live SSE 不 replay 历史事件；目标 session 历史消息由有限历史读取 hydration 后再接续 SSE。T02 覆盖幂等/跳号/多页/截断/未知事件；T05 已把 hydration 结果接到主区 timeline。
 - 活跃 turn/等待授权时切换的一次 `window.confirm` 仍为可逆假设（默认仍终结当前）；若用户希望「运行中也直接无提示切换」或「运行中禁止切换」，须更新 `requirement.md`、`ARCHITECTURE.md` 与 DECISIONS。
@@ -70,4 +76,4 @@
 
 ## Next Recommended Task
 
-- 无。`docs/webgui-history-sidebar/` T01–T07 已全部验收。
+- T08 — 隔离历史 hydration 与 live transport 生命周期。T02/T07 已完成并有证据，因此依赖已就绪；但这是“等待用户确认”的计划门，确认前不得派发 subagent。T08 验收后再串行进入 T09，不并行实施。

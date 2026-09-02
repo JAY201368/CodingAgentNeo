@@ -85,3 +85,21 @@
 - 选择：T07 把列出/分页/切换/fail-closed/hydration/follow-up/降级/ID 分离映射到既有 App/composable/client/history Vitest；只补 App 级「加载更多」接线。Python `tests/acceptance/test_webgui_history_sidebar_acceptance.py` 只扫描静态边界与 README，不启动浏览器、不调用真实模型。README 删除「there is no … server-restart Web resume」，改为描述侧边栏有限 JSON + `resume_session_id` 恢复路径。
 - 理由与替代：resume hydration 是浏览器 reducer 状态机，fake fetch 已覆盖顺序与 fail-closed；Python HTTP 历史/resume 已由 `docs/backend-history-discover/` 与 `tests/integration/test_http_history.py` 证明。再写一套 live HTTP「假装点侧边栏」的 Python 测试会复制 wire 而不增加 UI 证据。替代方案是 Playwright 真浏览器，本轮用户未提供未入库环境。
 - 后果：T07 完成态以 [acceptance.md](acceptance.md) 对照表 + Web 全量门 + 既有 Python 回归为准。未运行的真实模型/真实浏览器必须保持未声称。
+
+## 2026-09-02 — 0.2 变更：首屏改为无 session 副作用的选择态
+
+- 选择：首次挂载只读取历史列表，右侧主区保持空白；不自动创建新 session，也不因 localStorage transport hint 自动 attach。只有侧边栏历史项和上部圆形新建按钮能启动 session replacement。
+- 理由与替代：现有 `autoConnect → connect()` 把“打开 GUI”误当成“创建 session”，会先占用 single-active registry，再迫使历史切换额外清理。保留自动 attach 虽能延续刷新重连，但与用户明确要求“先在左侧选择 resume 或新建”冲突。
+- 后果：localStorage transport hint 降级为 replacement 前清理已知 transport 的线索，不再是 mount 自动连接授权。右侧显式结束/重连/新建入口由 T09 删除；SSE GET 仍可在已选择 session 内有限自动重连。此条 supersede T05/T07 完成态中由右侧 session entry 卡承担失败恢复入口的设计，但保留其历史记录。
+
+## 2026-09-02 — 0.2 变更：历史投影不能控制新 resume transport 生命周期
+
+- 选择：finite history hydration 只重建 timeline/历史 cursor；历史中的旧 `agent_end`、`session_end` 和终止状态不得关闭、遗忘或覆盖 resume POST 刚创建的 live transport。live connection/state/identity 只受创建/attach 结果与随后 live SSE 控制。
+- 理由与替代：现实现把 history envelope 重新编码后直接 dispatch 到 live `EVENT` reducer。目标历史若以 `session_end(INTERRUPTED)` 结束，消息虽能还原，但 reducer 会把新 transport 标为 closed 并清除 ID；backend registry 仍持有它，随后空 body create 命中 `409 session_exists`。仅改错误文案或再点一次重连不能修复所有权丢失。
+- 后果：此条 supersede 2026-09-01 “hydration 把 domain envelope 再编码为 wire 后走既有 EVENT”中“历史事件可以无条件驱动完整 live reducer 状态”的部分；复用 parser/timeline、重复/跳号/截断降级仍保留。T08 必须引入带来源语义的 action、独立历史投影或等价隔离，并证明 POST 成功后的 transport ID 所有权守恒。
+
+## 2026-09-02 — 0.2 变更：新建与历史选择是统一 replacement，左右独立滚动
+
+- 选择：新建和 resume 共用串行 lifecycle 锁，均先 DELETE 前端已知当前 transport，再执行各自唯一 POST；session 控制入口只存在于侧边栏。桌面根布局固定于 viewport，sidebar 与主区分别纵向滚动。
+- 理由与替代：仅让 resume 先 DELETE 而新建直接 POST 会在持久化 hint 或失败残留下重复出现 409；继续保留右侧生命周期按钮会让状态转换入口分散。document/body 主滚动又会让侧栏随右栏长消息移动，违背导航常驻预期。
+- 后果：T08 先稳定统一 replacement，T09 再改入口，T10 最后改滚动/视觉，T11 聚合验收。活跃 turn 的一次确认暂时保留为可逆假设；用户确认计划前不实施、不派发 subagent。
