@@ -5,6 +5,7 @@ model = "your-model-name"
 api_base = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 workspace = "."
+# ask: confirm writes and bash; auto: allow them; deny: reject them
 approval_mode = "ask"
 
 # Session history always lives at <workspace>/.coding-agent-neo/sessions/.

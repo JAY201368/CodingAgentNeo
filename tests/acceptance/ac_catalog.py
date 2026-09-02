@@ -29,8 +29,9 @@ CATALOG: dict[str, tuple[str, ...]] = {
         "tests/security/test_workspace_boundary.py::test_recursive_list_and_search_never_follow_outside_symlink",
     ),
     "AC-05": (
-        "tests/unit/test_policy.py::test_bash_asks_by_default",
-        "tests/unit/test_policy.py::test_bash_is_allowed_in_automatic_modes",
+        "tests/unit/test_policy.py::test_read_tools_are_allowed_without_approval",
+        "tests/unit/test_policy.py::test_write_tools_ask_by_default",
+        "tests/unit/test_policy.py::test_write_tools_are_allowed_in_automatic_modes",
         "tests/integration/test_cli.py::test_interactive_bash_confirmation",
         "tests/integration/test_cli.py::test_noninteractive_ask_denies_without_reading_and_auto_runs",
         "tests/integration/test_frontend_contract.py::test_interactive_approval_roundtrip_persists_request_before_execution",

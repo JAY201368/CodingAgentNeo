@@ -71,7 +71,7 @@ cp -R tests/fixtures/buggy_counter temp/ac01-buggy-counter
 | AC-02 | `test_agent_limits` 连续协议错误；registry 非法参数 | 自动化 |
 | AC-03 | Loop 编辑失败后修正；命令 timeout；Local 非零退出 | 自动化 |
 | AC-04 | `tests/security/test_workspace_boundary.py` | 自动化 |
-| AC-05 | policy 默认 ask；CLI 交互确认/拒绝；auto 无人值守 | 自动化 |
+| AC-05 | policy 默认对写操作与 bash ask；CLI 交互确认/拒绝；auto 无人值守 | 自动化 |
 | AC-06 | AC-01 JSONL；session store；中断轨迹 | 自动化 |
 | AC-07 | session recovery + resume CLI，不重放副作用 | 自动化 |
 | AC-08 | 小窗口 compaction；显式 system prompt 计入预算 | 自动化 |

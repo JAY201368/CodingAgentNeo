@@ -354,10 +354,10 @@ Registry、Executor 和 Agent Loop 必须面向上述 Tool 协议，而不得把
 | 操作 | 默认策略 |
 | --- | --- |
 | workspace 内的 `read_file`、`list_files`、`search` | allow |
-| workspace 内的 `write_file`、`edit_file` | allow |
+| workspace 内的 `write_file`、`edit_file` | 交互模式 ask |
 | `bash` | 交互模式 ask |
 | 文件工具越界、参数无法安全解析 | deny |
-| 显式 `--yolo` 或等价自动执行模式 | bash allow |
+| 显式 `--yolo` 或等价自动执行模式 | 写操作与 bash allow |
 
 安全策略自身发生异常时必须 fail-closed，即拒绝本次调用。
 
@@ -721,7 +721,7 @@ shell 返回非零退出码或文件编辑失败时，Agent Loop 不崩溃，失
 
 ### AC-05：权限策略
 
-交互模式下 bash 默认请求确认；拒绝后产生对应 ToolResult；显式自动执行模式下可完成无人工干预的任务。
+交互模式下 `write_file`、`edit_file` 和 bash 默认请求确认；拒绝后产生对应 ToolResult；只读文件工具不请求确认；显式自动执行模式下可完成无人工干预的任务。
 
 ### AC-06：轨迹完整性
 

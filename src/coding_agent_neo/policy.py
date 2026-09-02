@@ -196,15 +196,9 @@ class Policy(ExecutionPolicyProtocol, Protocol):
     """Compatibility alias for the policy protocol."""
 
 
-_FILE_TOOLS = frozenset(
-    {
-        "read_file",
-        "list_files",
-        "search",
-        "write_file",
-        "edit_file",
-    }
-)
+_READ_TOOLS = frozenset({"read_file", "list_files", "search"})
+_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
+_FILE_TOOLS = _READ_TOOLS | _WRITE_TOOLS
 _BASH_TOOL = "bash"
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
 
@@ -262,11 +256,13 @@ def _coerce_arguments(arguments: Mapping[str, Any] | str) -> Mapping[str, Any] |
 class DefaultExecutionPolicy:
     """Default allow/ask/deny policy for the six built-in tools.
 
-    Structured workspace operations are allowed after syntactic validation.
-    ``bash`` is ``ask`` by default, ``auto``/``yolo`` allows it, and ``deny``
-    rejects it.  Unknown tools and malformed argument objects are denied.
-    The policy does not attempt to inspect shell command text: a command
-    blacklist is not a reliable security boundary.
+    Read-only workspace tools (``read_file``, ``list_files``, ``search``) are
+    allowed after syntactic validation.  Side-effecting tools
+    (``write_file``, ``edit_file``, ``bash``) are ``ask`` by default,
+    ``auto``/``yolo`` allows them, and ``deny`` rejects them.  Unknown tools
+    and malformed argument objects are denied.  The policy does not attempt
+    to inspect shell command text: a command blacklist is not a reliable
+    security boundary.
     """
 
     def __init__(
@@ -334,6 +330,8 @@ class DefaultExecutionPolicy:
                 or not isinstance(parsed.get("new_text"), str)
             ):
                 return PolicyDecision.DENY
+            if tool_name in _WRITE_TOOLS:
+                return self._decide_side_effect()
             return PolicyDecision.ALLOW
 
         if tool_name == _BASH_TOOL:
@@ -344,15 +342,18 @@ class DefaultExecutionPolicy:
                 working_directory, allow_empty=True
             ):
                 return PolicyDecision.DENY
-            if self.approval_mode in {ApprovalMode.AUTO, ApprovalMode.YOLO}:
-                return PolicyDecision.ALLOW
-            if self.approval_mode is ApprovalMode.DENY:
-                return PolicyDecision.DENY
-            if self.interactive is False:
-                return PolicyDecision.DENY
-            return PolicyDecision.ASK
+            return self._decide_side_effect()
 
         return PolicyDecision.DENY
+
+    def _decide_side_effect(self) -> PolicyDecision:
+        if self.approval_mode in {ApprovalMode.AUTO, ApprovalMode.YOLO}:
+            return PolicyDecision.ALLOW
+        if self.approval_mode is ApprovalMode.DENY:
+            return PolicyDecision.DENY
+        if self.interactive is False:
+            return PolicyDecision.DENY
+        return PolicyDecision.ASK
 
     evaluate = decide
     check = decide

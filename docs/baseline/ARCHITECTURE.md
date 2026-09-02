@@ -214,7 +214,7 @@ Environment Protocol 暴露 `start()`、`close()`、`read_file()`、`list_files(
 
 ### 6.4 Tool 与策略
 
-Tool 至少公开 `name`、`description`、JSON-compatible schema、参数校验和 `execute(arguments, ToolExecutionContext)`。Registry、Executor 和 Loop 只依赖该协议，不区分内置、fake 或未来 adapter Tool。首版实际注册并激活的工具仍只有 `read_file`、`list_files`、`search`、`write_file`、`edit_file`、`bash`。默认策略：工作区内结构化文件工具 allow；交互 bash ask；越界或不安全参数 deny；auto/yolo 下 bash allow；未知非内置工具和策略异常 deny。
+Tool 至少公开 `name`、`description`、JSON-compatible schema、参数校验和 `execute(arguments, ToolExecutionContext)`。Registry、Executor 和 Loop 只依赖该协议，不区分内置、fake 或未来 adapter Tool。首版实际注册并激活的工具仍只有 `read_file`、`list_files`、`search`、`write_file`、`edit_file`、`bash`。默认策略：工作区内只读文件工具 allow；交互模式下 `write_file`/`edit_file`/`bash` ask；越界或不安全参数 deny；auto/yolo 下写操作与 bash allow；未知非内置工具和策略异常 deny。
 
 ### 6.5 事件、状态与错误
 
