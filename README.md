@@ -57,7 +57,10 @@ This is an API-only process. It listens on `127.0.0.1:8765` by default (use
 `--port` for another local port), has one active transport session, and does
 not serve Web assets. Stop it with Ctrl+C. The process reads the model,
 workspace, approval mode and API key from its Agent-side configuration; browser
-requests cannot supply or read those values.
+requests cannot supply or read those values, except that an active session can
+read and switch its approval mode through the versioned session API. In the
+interactive CLI, enter `/permissions` (or `/permissions ask|auto|deny`) to switch
+the same session-level policy.
 
 For Web development, run the Agent HTTP service above and start Vite in a
 second process. Vite forwards only `/api` to the loopback Agent service, so the

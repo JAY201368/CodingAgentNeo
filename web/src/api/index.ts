@@ -21,11 +21,13 @@ export type {
   AgentCommandType,
   AgentEventStreamMessage,
   ApprovalResponseCommand,
+  ApprovalMode,
   CloseSessionCommand,
   HealthResponse,
   InterruptCommand,
   RuntimeState,
   SessionCreatedResponse,
   SessionStatusResponse,
+  SetApprovalModeCommand,
   SubmitTaskCommand,
 } from '../domain/protocol'

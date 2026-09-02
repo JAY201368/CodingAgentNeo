@@ -17,6 +17,7 @@ import inspect
 import ntpath
 import posixpath
 import re
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -290,8 +291,8 @@ class DefaultExecutionPolicy:
             raise TypeError("interactive must be a boolean or None")
         if workspace is not None and not isinstance(workspace, str):
             raise TypeError("workspace must be a string or None")
-        self.approval_mode = ApprovalMode(normalized)
-        self.mode = self.approval_mode
+        self._mode_lock = threading.Lock()
+        self._approval_mode = ApprovalMode(normalized)
         self.interactive = interactive
         self.workspace = workspace
 
@@ -347,13 +348,44 @@ class DefaultExecutionPolicy:
         return PolicyDecision.DENY
 
     def _decide_side_effect(self) -> PolicyDecision:
-        if self.approval_mode in {ApprovalMode.AUTO, ApprovalMode.YOLO}:
+        approval_mode = self.approval_mode
+        if approval_mode in {ApprovalMode.AUTO, ApprovalMode.YOLO}:
             return PolicyDecision.ALLOW
-        if self.approval_mode is ApprovalMode.DENY:
+        if approval_mode is ApprovalMode.DENY:
             return PolicyDecision.DENY
         if self.interactive is False:
             return PolicyDecision.DENY
         return PolicyDecision.ASK
+
+    @property
+    def approval_mode(self) -> ApprovalMode:
+        with self._mode_lock:
+            return self._approval_mode
+
+    @approval_mode.setter
+    def approval_mode(self, value: ApprovalMode | str) -> None:
+        self.set_approval_mode(value)
+
+    @property
+    def mode(self) -> ApprovalMode:
+        return self.approval_mode
+
+    @mode.setter
+    def mode(self, value: ApprovalMode | str) -> None:
+        self.set_approval_mode(value)
+
+    def set_approval_mode(self, value: ApprovalMode | str) -> ApprovalMode:
+        """Atomically replace the mode used by subsequent policy decisions."""
+
+        if not isinstance(value, (str, ApprovalMode)):
+            raise TypeError("approval_mode must be ask, auto, or deny")
+        normalized = str(value).lower()
+        if normalized not in {"ask", "auto", "deny"}:
+            raise ValueError("approval_mode must be ask, auto, or deny")
+        selected = ApprovalMode(normalized)
+        with self._mode_lock:
+            self._approval_mode = selected
+        return selected
 
     evaluate = decide
     check = decide

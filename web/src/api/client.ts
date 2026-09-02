@@ -11,6 +11,7 @@ import {
   SessionCreatedResponse,
   SessionStatusResponse,
   asTransportSessionId,
+  isApprovalMode,
   isNonNegativeInteger,
   isRecord,
   isRuntimeState,
@@ -295,7 +296,8 @@ function parseCreated(body: unknown): SessionCreatedResponse {
     typeof body.transport_session_id !== 'string' ||
     body.transport_session_id.trim().length === 0 ||
     !isRuntimeState(body.state) ||
-    !isNonNegativeInteger(body.cursor)
+    !isNonNegativeInteger(body.cursor) ||
+    (body.approval_mode !== undefined && !isApprovalMode(body.approval_mode))
   ) {
     throw new AgentProtocolError('session 创建响应不符合 transport binding')
   }
@@ -303,6 +305,7 @@ function parseCreated(body: unknown): SessionCreatedResponse {
     transport_session_id: asTransportSessionId(body.transport_session_id),
     state: body.state,
     cursor: body.cursor,
+    approval_mode: isApprovalMode(body.approval_mode) ? body.approval_mode : 'ask',
   }
 }
 
@@ -312,10 +315,16 @@ function parseStatus(body: unknown): SessionStatusResponse {
     !isRuntimeState(body.state) ||
     !isNonNegativeInteger(body.cursor) ||
     typeof body.closed !== 'boolean'
+    || (body.approval_mode !== undefined && !isApprovalMode(body.approval_mode))
   ) {
     throw new AgentProtocolError('session 状态响应不符合 transport binding')
   }
-  return { state: body.state, cursor: body.cursor, closed: body.closed }
+  return {
+    state: body.state,
+    cursor: body.cursor,
+    closed: body.closed,
+    approval_mode: isApprovalMode(body.approval_mode) ? body.approval_mode : 'ask',
+  }
 }
 
 function parseAccepted(body: unknown): AcceptedResponse {
@@ -340,6 +349,7 @@ export function validateCommand(command: AgentCommand): void {
   }> = {
     SubmitTask: { required: ['type', 'text'], optional: [] },
     ApprovalResponse: { required: ['type', 'request_id', 'approved'], optional: [] },
+    SetApprovalMode: { required: ['type', 'mode'], optional: [] },
     Interrupt: { required: ['type'], optional: ['reason'] },
     CloseSession: { required: ['type'], optional: ['reason'] },
   }
@@ -355,6 +365,11 @@ export function validateCommand(command: AgentCommand): void {
     throw new AgentApiError(400, 'invalid_command', 'command is invalid')
   }
   if (command.type === 'SubmitTask' && (typeof command.text !== 'string' || command.text.trim().length === 0)) {
+    throw new AgentApiError(400, 'invalid_command', 'command is invalid')
+  }
+  if (
+    command.type === 'SetApprovalMode' && !isApprovalMode(command.mode)
+  ) {
     throw new AgentApiError(400, 'invalid_command', 'command is invalid')
   }
   if (
@@ -381,6 +396,8 @@ function wireCommand(command: AgentCommand): Record<string, unknown> {
       return { type: command.type, text: command.text }
     case 'ApprovalResponse':
       return { type: command.type, request_id: command.request_id, approved: command.approved }
+    case 'SetApprovalMode':
+      return { type: command.type, mode: command.mode }
     case 'Interrupt':
       return 'reason' in command ? { type: command.type, reason: command.reason } : { type: command.type }
     case 'CloseSession':

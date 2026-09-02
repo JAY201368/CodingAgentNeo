@@ -1,7 +1,7 @@
 # CodingAgentNeo Agent 适配层接口规范
 
 > 状态：In-process 与 HTTP/SSE binding 已实施；Web UI 作为独立产品消费第 4 节，不由本文定义
-> 规范版本：1.1
+> 规范版本：1.2
 > wire protocol：1；history DTO schema：1
 > 日期：2026-09-02
 > 后端依据：[agent-backend-interface.md](agent-backend-interface.md)
@@ -89,6 +89,7 @@ path、`SessionStore`、repository、factory、model client 或 environment。�
 backend.send(command)
 backend.events(since=cursor)
 backend.last_state
+backend.approval_mode
 backend.close()
 ```
 
@@ -201,6 +202,7 @@ binding 中都重新验证 fixed-directory 文件；listing 的 `resumable` 或 
 - 模型、workspace、approval mode 和 API Key 在 Agent HTTP 进程启动时配置；session 输出目录始终由
   `resolved_workspace / ".coding-agent-neo" / "sessions"` 派生，既不是配置字段也不是请求参数。
   普通浏览器请求不得提供或读取 workspace、目录、文件名、模型或凭据。
+- approval mode 例外地作为会话级运行时策略开放读写；它不暴露其他 Agent 配置，也不会回写配置文件。
 - 生产配置和 CLI 不提供 `session_dir` 或 `--session-dir`；旧输入必须按 unknown-option/config
   validation 拒绝。CLI 的既有 `--resume SESSION_ID` 只接受 opaque ID，不接受 JSONL 路径；custom
   session directories 不自动发现或迁移。
@@ -320,10 +322,10 @@ Agent 的线性 session 语义。浏览器失联不自动批准、拒绝、中�
 | `GET /api/v1/health` | 无 | `200 {status:"ok",protocol_version:1}` | — |
 | `GET /api/v1/session-history?limit=n&cursor=...` | bounded list query | `200 SessionHistoryPage`（finite JSON） | 400 invalid ID/cursor/limit、404/422 history |
 | `GET /api/v1/session-history/{session_id}/events?since=n&limit=m` | opaque ID + bounded query | `200 SessionEventPage`（finite JSON） | 400 invalid ID/cursor/limit、404/422 history |
-| `POST /api/v1/sessions` | 空 body、`{}` 或 `{"resume_session_id":"session_..."}` | `201 {transport_session_id,state,cursor}` | 400 非法 body/ID、409 已有活跃 session、422 invalid resume |
-| `GET /api/v1/sessions/{id}` | 无 | `200 {state,cursor,closed}` | 404 未知、410 已关闭 |
+| `POST /api/v1/sessions` | 空 body、`{}` 或 `{"resume_session_id":"session_..."}` | `201 {transport_session_id,state,cursor,approval_mode}` | 400 非法 body/ID、409 已有活跃 session、422 invalid resume |
+| `GET /api/v1/sessions/{id}` | 无 | `200 {state,cursor,closed,approval_mode}` | 404 未知、410 已关闭 |
 | `GET /api/v1/sessions/{id}/events?since=n` | 非负整数；可带 `Last-Event-ID` | `200 text/event-stream` | 400 非法游标、404/410 session |
-| `POST /api/v1/sessions/{id}/commands` | 四种 AgentCommand JSON | `202 {accepted:true}` | 400 非法命令、409 turn 进行中、410 backend 关闭 |
+| `POST /api/v1/sessions/{id}/commands` | 五种 AgentCommand JSON | `202 {accepted:true}` | 400 非法命令、409 turn 进行中、410 backend 关闭 |
 | `DELETE /api/v1/sessions/{id}` | 无 | `204`，幂等关闭并释放当前 backend | 404 未知 session |
 
 ### 4.4 SSE
@@ -364,7 +366,7 @@ registry 检查先于 backend/provider 创建，因此 active session 存在时�
 成功响应字段始终精确为：
 
 ```json
-{"transport_session_id":"transport_...","state":"RUNNING","cursor":0}
+{"transport_session_id":"transport_...","state":"RUNNING","cursor":0,"approval_mode":"ask"}
 ```
 
 新 session 的 `cursor` 为 `0`；resume 的 `cursor` 为 provider 重验证后恢复文件的最后 canonical
@@ -379,10 +381,11 @@ HTTP adapter 只接受：
 
 - `{"type":"SubmitTask","text":"检查失败测试"}`
 - `{"type":"ApprovalResponse","request_id":"correlation_...","approved":true}`
+- `{"type":"SetApprovalMode","mode":"auto"}`
 - `{"type":"Interrupt","reason":"user_cancelled"}`
 - `{"type":"CloseSession","reason":"frontend_exit"}`
 
-`SubmitTask.text`、`ApprovalResponse.request_id` 和显式提供的 `reason` 必须是非空字符串；`approved` 必须是 JSON boolean。命令不接受额外字段。成功的 `202 {"accepted":true}` 只表示命令已被接受，不表示 turn 已完成；POST 连接失败也不能证明命令未被接受，因此客户端不得自动重放。
+`SubmitTask.text`、`ApprovalResponse.request_id` 和显式提供的 `reason` 必须是非空字符串；`approved` 必须是 JSON boolean；`SetApprovalMode.mode` 只能是 `ask | auto | deny`。命令不接受额外字段。成功的 `202 {"accepted":true}` 只表示命令已被接受，不表示 turn 已完成；POST 连接失败也不能证明命令未被接受，因此客户端不得自动重放。
 
 稳定错误映射如下；`message` 必须使用表中的固定安全短句，客户端逻辑只按 HTTP status 和 `code` 分支：
 

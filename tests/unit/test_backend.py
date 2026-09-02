@@ -16,6 +16,7 @@ from coding_agent_neo.backend import (
     BackendClosedError,
     CloseSession,
     Interrupt,
+    SetApprovalMode,
     SubmitTask,
     TurnInProgressError,
 )
@@ -115,6 +116,7 @@ def test_commands_are_json_serializable_without_callables() -> None:
     commands = (
         SubmitTask("inspect the workspace"),
         ApprovalResponse("correlation_1", True),
+        SetApprovalMode("deny"),
         Interrupt("user"),
         CloseSession("done"),
     )
@@ -140,6 +142,27 @@ def test_submit_task_during_turn_is_rejected(tmp_path: Path) -> None:
             backend.send(SubmitTask("second"))
         wait_session(tmp_path, lambda event: event.type == EventType.TURN_END)
         assert backend.last_state is RuntimeState.COMPLETED_TURN
+    finally:
+        backend.close()
+
+
+def test_runtime_permission_mode_changes_subsequent_tool_decisions(tmp_path: Path) -> None:
+    environment = FakeExecutionEnvironment()
+    backend = make_backend(
+        tmp_path,
+        ScriptedModel([bash_call("printf switched"), NormalizedAssistantResponse(text="done")]),
+        interactive=True,
+        environment=environment,
+        approval_mode="ask",
+    )
+    try:
+        assert backend.approval_mode == "ask"
+        backend.send(SetApprovalMode("auto"))
+        assert backend.approval_mode == "auto"
+        backend.send(SubmitTask("run without a prompt"))
+        events = wait_session(tmp_path, lambda event: event.type == EventType.TURN_END)
+        assert all(event.type != EventType.APPROVAL_REQUEST for event in events)
+        assert any(call.operation == "run_command" for call in environment.calls)
     finally:
         backend.close()
 

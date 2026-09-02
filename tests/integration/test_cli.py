@@ -254,6 +254,25 @@ def test_interactive_bash_confirmation(tmp_path: Path) -> None:
     assert "approved" in output.getvalue()
 
 
+def test_interactive_permissions_command_changes_mode_without_agent_turn(tmp_path: Path) -> None:
+    output = StringIO()
+    code = run_cli(
+        config(tmp_path, approval_mode="ask"),
+        task=None,
+        interactive=True,
+        input_stream=StringIO("/permissions\nauto\nrun it\n"),
+        output_stream=output,
+        error_stream=StringIO(),
+        backend_factory=factory_for(
+            ScriptedModel([bash_call("printf switched"), NormalizedAssistantResponse(text="done")])
+        ),
+    )
+    assert code == 0
+    assert "Permission mode: ask" in output.getvalue()
+    assert "Permission mode changed to auto" in output.getvalue()
+    assert "Approve bash command" not in output.getvalue()
+
+
 def test_keyboard_interrupt_is_documented_and_persisted(tmp_path: Path) -> None:
     stderr = StringIO()
     code = run_cli(

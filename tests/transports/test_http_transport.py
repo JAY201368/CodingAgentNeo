@@ -32,6 +32,7 @@ from coding_agent_neo.backend import (
     SessionHistoryNotFoundError,
     SessionHistoryPage,
     SessionHistoryUnavailableError,
+    SetApprovalMode,
     SubmitTask,
     TurnInProgressError,
 )
@@ -400,7 +401,9 @@ def test_health_session_state_and_single_active_registry(backend_and_client) -> 
     transport_id = _session_id(client)
     created = client.get(f"/api/v1/sessions/{transport_id}")
     assert created.status_code == 200
-    assert created.json() == {"state": "RUNNING", "cursor": 0, "closed": False}
+    assert created.json() == {
+        "state": "RUNNING", "cursor": 0, "closed": False, "approval_mode": "ask"
+    }
 
     conflict = client.post("/api/v1/sessions", json={})
     assert conflict.status_code == 409
@@ -408,13 +411,14 @@ def test_health_session_state_and_single_active_registry(backend_and_client) -> 
     assert backend.commands == []
 
 
-def test_command_decoder_accepts_four_commands_and_is_non_blocking(backend_and_client) -> None:
+def test_command_decoder_accepts_public_commands_and_is_non_blocking(backend_and_client) -> None:
     backend, client = backend_and_client
     transport_id = _session_id(client)
     path = f"/api/v1/sessions/{transport_id}/commands"
     commands = (
         {"type": "SubmitTask", "text": "inspect"},
         {"type": "ApprovalResponse", "request_id": "correlation_1", "approved": False},
+        {"type": "SetApprovalMode", "mode": "deny"},
         {"type": "Interrupt"},
     )
     for payload in commands:
@@ -424,9 +428,11 @@ def test_command_decoder_accepts_four_commands_and_is_non_blocking(backend_and_c
     assert [type(command).__name__ for command in backend.commands] == [
         "SubmitTask",
         "ApprovalResponse",
+        "SetApprovalMode",
         "Interrupt",
     ]
     assert backend.commands[0].to_dict() == {"type": "SubmitTask", "text": "inspect"}
+    assert isinstance(backend.commands[2], SetApprovalMode)
 
 
 def test_sse_since_last_event_id_keepalive_and_canonical_data(backend_and_client) -> None:
@@ -662,6 +668,12 @@ def test_http_path_injects_shared_backend_service_without_in_process_adapter(tmp
     app = create_app(provider, close_timeout_seconds=2.0)
     with TestClient(app) as client:
         transport_id = _session_id(client)
+        changed = client.post(
+            f"/api/v1/sessions/{transport_id}/commands",
+            json={"type": "SetApprovalMode", "mode": "auto"},
+        )
+        assert changed.status_code == 202
+        assert client.get(f"/api/v1/sessions/{transport_id}").json()["approval_mode"] == "auto"
         response = client.post(
             f"/api/v1/sessions/{transport_id}/commands",
             json={"type": "SubmitTask", "text": "service task"},

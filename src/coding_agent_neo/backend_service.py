@@ -41,6 +41,7 @@ from coding_agent_neo.backend import (
     BackendClosedError,
     CloseSession,
     Interrupt,
+    SetApprovalMode,
     SubmitTask,
     TurnInProgressError,
 )
@@ -354,14 +355,26 @@ class AgentBackendService(AgentBackend):
     def last_state(self) -> RuntimeState:
         return self._stream.last_state
 
+    @property
+    def approval_mode(self) -> str:
+        return str(self._loop.runtime.execution_policy.approval_mode)
+
     def send(self, command: AgentCommand) -> None:
-        if not isinstance(command, (SubmitTask, ApprovalResponse, Interrupt, CloseSession)):
+        if not isinstance(
+            command, (SubmitTask, ApprovalResponse, SetApprovalMode, Interrupt, CloseSession)
+        ):
             raise TypeError("command must be a public AgentCommand")
         with self._lock:
             if self._stopped:
                 raise BackendClosedError("backend session is closed")
             if isinstance(command, ApprovalResponse):
                 self._approval.respond(command)
+                return
+            if isinstance(command, SetApprovalMode):
+                setter = getattr(self._loop.runtime.execution_policy, "set_approval_mode", None)
+                if not callable(setter):
+                    raise TypeError("execution policy does not support runtime mode changes")
+                setter(command.mode)
                 return
             if isinstance(command, Interrupt):
                 self._approval.interrupt(command.reason)

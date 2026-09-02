@@ -7,11 +7,13 @@
     "transport_session_id": "transport_fixture_1",
     "state": "RUNNING",
     "cursor": 0,
-    "closed": false
+    "closed": false,
+    "approval_mode": "ask"
   },
   "commands": [
     { "type": "SubmitTask", "text": "inspect" },
     { "type": "ApprovalResponse", "request_id": "correlation_fixture_1", "approved": false },
+    { "type": "SetApprovalMode", "mode": "auto" },
     { "type": "Interrupt", "reason": "user_cancelled" },
     { "type": "CloseSession", "reason": "frontend_exit" }
   ],
@@ -170,7 +172,8 @@
       "response": {
         "transport_session_id": "transport_fixture_1",
         "state": "RUNNING",
-        "cursor": 4
+        "cursor": 4,
+        "approval_mode": "ask"
       }
     }
   },

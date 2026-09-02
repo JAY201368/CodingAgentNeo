@@ -7,7 +7,13 @@ import {
   AgentRequestAbortedError,
 } from '../api/client'
 import { isCanonicalSessionId } from '../domain/history'
-import type { AgentCommand, AgentEventEnvelope, AgentEventStreamMessage, RuntimeState } from '../domain/protocol'
+import type {
+  AgentCommand,
+  AgentEventEnvelope,
+  AgentEventStreamMessage,
+  ApprovalMode,
+  RuntimeState,
+} from '../domain/protocol'
 import {
   CommandGate,
   SessionAction,
@@ -219,6 +225,8 @@ export interface AgentSessionController {
   readonly storedSession: ComputedRef<PersistedTransportSession | null>
   readonly switching: ComputedRef<boolean>
   readonly lifecycleBusy: Ref<LifecycleBusyReason | null>
+  readonly approvalMode: Ref<ApprovalMode>
+  readonly permissionsUpdating: Ref<boolean>
   readonly connect: (signal?: AbortSignal) => Promise<SessionState>
   readonly createNewSession: (signal?: AbortSignal) => Promise<void>
   readonly resumeSession: (historySessionId: string, signal?: AbortSignal) => Promise<void>
@@ -231,6 +239,7 @@ export interface AgentSessionController {
     signal?: AbortSignal,
   ) => Promise<void>
   readonly interrupt: (reason?: string, signal?: AbortSignal) => Promise<void>
+  readonly setApprovalMode: (mode: ApprovalMode, signal?: AbortSignal) => Promise<void>
   readonly close: (reason?: string, signal?: AbortSignal) => Promise<void>
   readonly deleteSession: (signal?: AbortSignal) => Promise<void>
   readonly forgetSession: (message?: string) => void
@@ -254,6 +263,8 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
   const cursor = computed(() => state.value.cursor)
   const storedSession = computed(() => storedHint.value)
   const lifecycleBusy = ref<LifecycleBusyReason | null>(null)
+  const approvalMode = ref<ApprovalMode>('ask')
+  const permissionsUpdating = ref(false)
   const switching = computed(() => lifecycleBusy.value !== null)
   let eventsAbortController: AbortController | null = null
   let eventsRun = 0
@@ -513,6 +524,7 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
           cursor: resumeHint.cursor,
           state: status.state,
         })
+        approvalMode.value = status.approval_mode
         storedHint.value = resumeHint
         savePersistedTransportSession(storage, resumeHint, storageKey)
       } else {
@@ -523,6 +535,7 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
           cursor: created.cursor,
           state: created.state,
         })
+        approvalMode.value = created.approval_mode
         const value = {
           transportSessionId: created.transport_session_id,
           cursor: created.cursor,
@@ -614,6 +627,28 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
       throw new SessionCommandError('中断原因不能为空')
     }
     await send({ type: 'Interrupt', reason }, signal)
+  }
+
+  async function setApprovalMode(mode: ApprovalMode, signal?: AbortSignal): Promise<void> {
+    if (!['ask', 'auto', 'deny'].includes(mode)) {
+      throw new SessionCommandError('权限模式无效')
+    }
+    if (permissionsUpdating.value || mode === approvalMode.value) {
+      return
+    }
+    const id = ensureSession()
+    permissionsUpdating.value = true
+    try {
+      await client.sendCommand(id, { type: 'SetApprovalMode', mode }, signal)
+      approvalMode.value = mode
+    } catch (error) {
+      if (isUnavailableSessionError(error)) {
+        forgetSession()
+      }
+      throw error
+    } finally {
+      permissionsUpdating.value = false
+    }
   }
 
   async function close(reason = 'frontend_exit', signal?: AbortSignal): Promise<void> {
@@ -722,6 +757,7 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
       readonly transport_session_id: string
       readonly cursor: number
       readonly state: RuntimeState
+      readonly approval_mode: ApprovalMode
     }>,
     afterConnected?: () => Promise<void>,
   ): Promise<void> {
@@ -750,6 +786,7 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
         operation === 'resume' ? 0 : created.cursor,
         created.state,
       )
+      approvalMode.value = created.approval_mode
       if (afterConnected !== undefined) {
         try {
           await afterConnected()
@@ -793,6 +830,8 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
     storedSession,
     switching,
     lifecycleBusy,
+    approvalMode,
+    permissionsUpdating,
     connect,
     createNewSession,
     resumeSession,
@@ -801,6 +840,7 @@ export function useAgentSession(options: UseAgentSessionOptions = {}): AgentSess
     submitTask,
     respondToApproval,
     interrupt,
+    setApprovalMode,
     close,
     deleteSession,
     forgetSession,

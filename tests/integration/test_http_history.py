@@ -54,7 +54,9 @@ def test_browser_wire_fixture_history_samples_match_http_shape() -> None:
     assert events_page["session_id"].startswith("session_")
     resume = history["resume"]
     assert set(resume["request"]) == {"resume_session_id"}
-    assert set(resume["response"]) == {"transport_session_id", "state", "cursor"}
+    assert set(resume["response"]) == {
+        "transport_session_id", "state", "cursor", "approval_mode"
+    }
     assert resume["response"]["transport_session_id"].startswith("transport_")
     assert resume["request"]["resume_session_id"] == events_page["session_id"]
 

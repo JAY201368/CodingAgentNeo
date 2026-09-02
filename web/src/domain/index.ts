@@ -45,11 +45,13 @@ export type {
 } from './history'
 export {
   BASE_PATH,
+  APPROVAL_MODES,
   PROTOCOL_VERSION,
   PUBLIC_EVENT_TYPES,
   RUNTIME_STATES,
   asCanonicalSessionId,
   asTransportSessionId,
+  isApprovalMode,
   isNonNegativeInteger,
   isPositiveSequence,
   isPublicEventType,
@@ -63,6 +65,7 @@ export type {
   AgentEventEnvelope,
   AgentEventStreamMessage,
   ApprovalResponseCommand,
+  ApprovalMode,
   CanonicalSessionId,
   CloseSessionCommand,
   EventType,
@@ -73,6 +76,7 @@ export type {
   RuntimeState,
   SessionCreatedResponse,
   SessionStatusResponse,
+  SetApprovalModeCommand,
   SubmitTaskCommand,
   TransportSessionId,
 } from './protocol'

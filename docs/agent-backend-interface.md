@@ -1,6 +1,6 @@
 # CodingAgentNeo Agent 后端接口规范
 
-> 规范版本：1.2
+> 规范版本：1.3
 > 事件 schema：1；历史 DTO schema：1
 > 基线日期：2026-09-01；文档勘误：2026-09-02
 > 适用范围：AgentBackend 应用端口及其规范语义
@@ -22,6 +22,7 @@ per-session live binding 只能通过 `AgentBackend` Port：
 - 用 `send(command)` 发送命令；
 - 用 `events(since=sequence)` 拉取事件；
 - 读取 `last_state`；
+- 对支持权限扩展的实现读取 `approval_mode`；
 - 在结束时调用 `close()`。
 
 适配层负责把特定调用方式映射到上述端口，并保持命令、事件、错误和生命周期语义。适配层不得持有或直接调用 `AgentLoop`、`AgentRuntime`、`SessionStore`、`ExecutionEnvironment`、`ModelClient`、`ToolRegistry`，也不得复制工具策略、路径安全、Agent 决策或持久化逻辑。
@@ -194,10 +195,11 @@ class AgentBackend(Protocol):
 
 ### 2.1 `send(command)`
 
-- 接受且仅接受第 3 节的四种命令。
+- 接受且仅接受第 3 节的五种命令。
 - 调用是线程安全、非阻塞的；成功返回只表示命令已被接受或信号已送达，不表示 turn 已完成。
 - `SubmitTask` 被唯一执行通道接受；同一时刻最多执行一个 turn。
 - `ApprovalResponse` 和 `Interrupt` 必须在当前 turn 结束前及时生效，不能排队等待该 turn 结束。
+- `SetApprovalMode` 在调用返回前更新会话策略，后续工具决策必须读取新模式。
 - `CloseSession` 立即关闭命令入口并请求有序停机。
 
 | 异常 | 条件 | Adapter 映射义务 |
@@ -264,7 +266,17 @@ class AgentBackend(Protocol):
 - 没有待处理授权时发送该命令不会产生批准效果。
 - ID 不匹配时，当前待处理授权按 fail-closed 拒绝；adapter 及其调用者不得猜测、缓存复用或改写 request ID。
 
-### 3.3 `Interrupt`
+### 3.3 `SetApprovalMode`
+
+```json
+{"type":"SetApprovalMode","mode":"auto"}
+```
+
+- `mode` 只能是 `ask | auto | deny`；非法值 fail-closed 拒绝。
+- 更改是 session 级、内存中的运行时状态，不改写启动配置；新建或恢复一个 transport session 时仍以 Agent 启动配置为初值。
+- 切换不会溯及既往 `policy_decision`，也不会自动回答已经挂起的 `approval_request`。
+
+### 3.4 `Interrupt`
 
 ```json
 {"type":"Interrupt","reason":"user_cancelled"}
@@ -274,7 +286,7 @@ class AgentBackend(Protocol):
 - 立即设置当前 Runtime 的协作式取消信号，并使挂起授权按拒绝处理。
 - 中断是 session 的终止路径，不是暂停；通常会依次看到 `turn_end(INTERRUPTED)`、`agent_end`、`session_end`。
 
-### 3.4 `CloseSession`
+### 3.5 `CloseSession`
 
 ```json
 {"type":"CloseSession","reason":"frontend_exit"}

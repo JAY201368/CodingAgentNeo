@@ -116,6 +116,7 @@ describe('AgentHttpClient', () => {
     expect(bodies).toEqual([
       '{"type":"SubmitTask","text":"inspect"}',
       '{"type":"ApprovalResponse","request_id":"correlation_fixture_1","approved":false}',
+      '{"type":"SetApprovalMode","mode":"auto"}',
       '{"type":"Interrupt","reason":"user_cancelled"}',
       '{"type":"CloseSession","reason":"frontend_exit"}',
     ])

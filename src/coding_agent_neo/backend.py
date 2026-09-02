@@ -347,6 +347,20 @@ class ApprovalResponse:
 
 
 @dataclass(frozen=True, slots=True)
+class SetApprovalMode:
+    """Change the session's tool approval policy at runtime."""
+
+    mode: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, str) or self.mode not in {"ask", "auto", "deny"}:
+            raise ValueError("approval mode must be ask, auto, or deny")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "SetApprovalMode", **asdict(self)}
+
+
+@dataclass(frozen=True, slots=True)
 class Interrupt:
     """Cancel the running turn. Takes effect on the caller thread."""
 
@@ -374,7 +388,7 @@ class CloseSession:
         return {"type": "CloseSession", **asdict(self)}
 
 
-AgentCommand = SubmitTask | ApprovalResponse | Interrupt | CloseSession
+AgentCommand = SubmitTask | ApprovalResponse | SetApprovalMode | Interrupt | CloseSession
 
 
 @runtime_checkable
@@ -389,6 +403,14 @@ class AgentBackend(Protocol):
     def events(self, *, since: int = 0) -> Iterator[EventEnvelope]: ...
 
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class PermissionAwareAgentBackend(Protocol):
+    """Optional extension exposing the current session approval mode."""
+
+    @property
+    def approval_mode(self) -> str: ...
 
 
 _COMPATIBILITY_NAMES = frozenset(
@@ -433,12 +455,14 @@ __all__ = [
     "InvalidSessionHistoryLimitError",
     "Interrupt",
     "LocalAgentBackend",
+    "PermissionAwareAgentBackend",
     "SessionEventPage",
     "SessionHistoryItem",
     "SessionHistoryNotFoundError",
     "SessionHistoryPage",
     "SessionHistoryUnavailableError",
     "SessionResumeUnavailableError",
+    "SetApprovalMode",
     "SubmitTask",
     "TurnInProgressError",
 ]

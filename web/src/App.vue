@@ -14,6 +14,7 @@ import HistorySidebar from './components/HistorySidebar.vue'
 import TaskComposer from './components/TaskComposer.vue'
 import Timeline from './components/Timeline.vue'
 import { projectTimeline } from './domain/timeline'
+import type { ApprovalMode } from './domain/protocol'
 
 const props = withDefaults(defineProps<{
   readonly client?: import('./api/client').AgentHttpClient
@@ -209,6 +210,15 @@ async function respondToApproval(requestId: string, approved: boolean): Promise<
   }
 }
 
+async function changePermissionMode(mode: ApprovalMode): Promise<void> {
+  actionError.value = null
+  try {
+    await session.setApprovalMode(mode)
+  } catch (error) {
+    handleFailure(error)
+  }
+}
+
 function onCreateSession(): void {
   closeHistoryDrawer()
   void createSessionFromSidebar()
@@ -395,7 +405,10 @@ onBeforeUnmount(() => {
               ref="composer"
               :disabled="composerDisabled"
               :pending="session.state.value.commandInFlight === 'SubmitTask'"
+              :approval-mode="session.approvalMode.value"
+              :permissions-updating="session.permissionsUpdating.value"
               @submit="submitTask"
+              @permission-change="changePermissionMode"
             />
           </div>
         </template>

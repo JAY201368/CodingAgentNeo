@@ -90,6 +90,10 @@ class InProcessAdapter:
     def last_state(self) -> RuntimeState:
         return self._backend.last_state
 
+    @property
+    def approval_mode(self) -> str:
+        return self._backend.approval_mode
+
     def send(self, command: AgentCommand) -> None:
         self._backend.send(command)
 

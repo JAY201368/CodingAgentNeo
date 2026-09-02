@@ -23,6 +23,7 @@ from coding_agent_neo.backend import (
     BackendClosedError,
     CloseSession,
     Interrupt,
+    SetApprovalMode,
     SubmitTask,
 )
 from coding_agent_neo.config import AppConfig, ConfigError, load_config
@@ -168,6 +169,46 @@ def _interactive_task(input_stream: TextIO, output: TextIO, prompt: str) -> str 
     return value or None
 
 
+def _select_permission_mode(
+    command: str,
+    backend: AgentBackend,
+    input_stream: TextIO,
+    output: TextIO,
+) -> None:
+    """Handle ``/permissions`` locally without creating an Agent turn."""
+
+    parts = command.split()
+    selected = parts[1].casefold() if len(parts) == 2 else None
+    if len(parts) > 2 or (selected is not None and selected not in {"ask", "auto", "deny"}):
+        output.write("Usage: /permissions [ask|auto|deny]\n")
+        output.flush()
+        return
+    current = str(getattr(backend, "approval_mode", "ask"))
+    if selected is None:
+        output.write(
+            f"Permission mode: {current}\n"
+            "  ask  - confirm each write or command\n"
+            "  auto - allow writes and commands automatically\n"
+            "  deny - block writes and commands\n"
+            "Select [ask/auto/deny] (blank to cancel): "
+        )
+        output.flush()
+        answer = input_stream.readline()
+        if not answer:
+            return
+        selected = answer.strip().casefold()
+        if not selected:
+            return
+        if selected not in {"ask", "auto", "deny"}:
+            output.write("Invalid permission mode; unchanged.\n")
+            output.flush()
+            return
+    backend.send(SetApprovalMode(selected))
+    updated = str(getattr(backend, "approval_mode", selected))
+    output.write(f"Permission mode changed to {updated}.\n")
+    output.flush()
+
+
 def _prompt_approval(event: Any, output: TextIO, input_stream: TextIO) -> bool:
     payload = event.payload if isinstance(getattr(event, "payload", None), Mapping) else {}
     tool = payload.get("tool_name", "tool")
@@ -285,6 +326,10 @@ def run_cli(
             prompt = "follow-up> " if resume is not None else "task> "
             current = _interactive_task(input_stream, output_stream, prompt)
         while current is not None:
+            if interactive and current.split(maxsplit=1)[0].casefold() == "/permissions":
+                _select_permission_mode(current, backend, input_stream, output_stream)
+                current = _interactive_task(input_stream, output_stream, "follow-up> ")
+                continue
             backend.send(SubmitTask(current))
             ran_turn = True
             cursor, assistant_text, seen = _consume_turn(

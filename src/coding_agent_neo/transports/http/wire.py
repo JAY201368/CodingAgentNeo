@@ -61,12 +61,14 @@ class SessionCreatedResponse:
     transport_session_id: str
     state: RuntimeState | str
     cursor: int = 0
+    approval_mode: str = "ask"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "transport_session_id": self.transport_session_id,
             "state": _state_value(self.state),
             "cursor": self.cursor,
+            "approval_mode": self.approval_mode,
         }
 
 
@@ -77,12 +79,14 @@ class SessionStatusResponse:
     state: RuntimeState | str
     cursor: int
     closed: bool
+    approval_mode: str = "ask"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "state": _state_value(self.state),
             "cursor": self.cursor,
             "closed": self.closed,
+            "approval_mode": self.approval_mode,
         }
 
 

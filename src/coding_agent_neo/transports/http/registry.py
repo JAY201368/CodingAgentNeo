@@ -243,6 +243,11 @@ class TransportSession:
     def state(self) -> Any:
         return self._backend.last_state
 
+    @property
+    def approval_mode(self) -> str:
+        value = getattr(self._backend, "approval_mode", "ask")
+        return value if value in {"ask", "auto", "deny"} else "ask"
+
     def record_event(self, sequence: int) -> None:
         """Advance the status cursor only after an SSE event was emitted."""
 

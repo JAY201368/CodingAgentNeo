@@ -464,6 +464,7 @@ def create_app(
                 session.transport_session_id,
                 session.state,
                 cursor=session.cursor,
+                approval_mode=session.approval_mode,
             )
             return JSONResponse(response.to_dict(), status_code=201, media_type=_JSON_MEDIA_TYPE)
         except SessionExistsError:
@@ -485,7 +486,9 @@ def create_app(
             return error
         assert session is not None
         try:
-            response = SessionStatusResponse(session.state, session.cursor, session.closed)
+            response = SessionStatusResponse(
+                session.state, session.cursor, session.closed, session.approval_mode
+            )
             return JSONResponse(response.to_dict(), media_type=_JSON_MEDIA_TYPE)
         except Exception:
             return _safe_error()

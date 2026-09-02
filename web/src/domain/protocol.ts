@@ -19,6 +19,9 @@ export const RUNTIME_STATES = [
 
 export type RuntimeState = (typeof RUNTIME_STATES)[number]
 
+export const APPROVAL_MODES = ['ask', 'auto', 'deny'] as const
+export type ApprovalMode = (typeof APPROVAL_MODES)[number]
+
 export const PUBLIC_EVENT_TYPES = [
   'session_start',
   'agent_start',
@@ -67,12 +70,14 @@ export interface SessionCreatedResponse {
   readonly transport_session_id: TransportSessionId
   readonly state: RuntimeState
   readonly cursor: number
+  readonly approval_mode: ApprovalMode
 }
 
 export interface SessionStatusResponse {
   readonly state: RuntimeState
   readonly cursor: number
   readonly closed: boolean
+  readonly approval_mode: ApprovalMode
 }
 
 export interface AcceptedResponse {
@@ -95,6 +100,11 @@ export interface InterruptCommand {
   readonly reason?: string
 }
 
+export interface SetApprovalModeCommand {
+  readonly type: 'SetApprovalMode'
+  readonly mode: ApprovalMode
+}
+
 export interface CloseSessionCommand {
   readonly type: 'CloseSession'
   readonly reason?: string
@@ -103,6 +113,7 @@ export interface CloseSessionCommand {
 export type AgentCommand =
   | SubmitTaskCommand
   | ApprovalResponseCommand
+  | SetApprovalModeCommand
   | InterruptCommand
   | CloseSessionCommand
 
@@ -142,6 +153,10 @@ export interface PendingApproval {
 
 export function isRuntimeState(value: unknown): value is RuntimeState {
   return typeof value === 'string' && (RUNTIME_STATES as readonly string[]).includes(value)
+}
+
+export function isApprovalMode(value: unknown): value is ApprovalMode {
+  return typeof value === 'string' && (APPROVAL_MODES as readonly string[]).includes(value)
 }
 
 export function isPublicEventType(value: string): value is PublicEventType {

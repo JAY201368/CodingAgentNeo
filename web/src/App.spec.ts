@@ -213,6 +213,28 @@ async function createEmptySession(wrapper: VueWrapper): Promise<void> {
 }
 
 describe('App conversation after explicit create', () => {
+  it('switches the session permission mode from the composer tabs', async () => {
+    const scripted = makeScriptedClient()
+    const wrapper = mount(App, { props: { client: scripted.client, storage: null } })
+    await settle()
+    await createEmptySession(wrapper)
+
+    const trigger = wrapper.get('.composer__permission-trigger')
+    expect(trigger.text()).toContain('询问')
+    await trigger.trigger('click')
+    const options = wrapper.findAll('.composer__permission-option')
+    expect(options).toHaveLength(3)
+    await options[1].trigger('click')
+    await flushPromises()
+
+    expect(scripted.commandCalls).toHaveBeenCalledWith(
+      '{"type":"SetApprovalMode","mode":"auto"}',
+    )
+    expect(wrapper.get('.composer__permission-trigger').text()).toContain('自动')
+    expect(wrapper.find('.composer__permission-menu').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('creates a session from the sidebar, submits one task, and renders the ordered final timeline', async () => {
     const scripted = makeScriptedClient({
       events: [

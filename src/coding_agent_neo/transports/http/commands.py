@@ -1,4 +1,4 @@
-"""Decode the four public Agent commands at the HTTP boundary."""
+"""Decode the public Agent commands at the HTTP boundary."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from coding_agent_neo.backend import (
     ApprovalResponse,
     CloseSession,
     Interrupt,
+    SetApprovalMode,
     SubmitTask,
 )
 
@@ -21,6 +22,7 @@ class CommandDecodeError(ValueError):
 _COMMAND_FIELDS = {
     "SubmitTask": (frozenset({"type", "text"}), frozenset()),
     "ApprovalResponse": (frozenset({"type", "request_id", "approved"}), frozenset()),
+    "SetApprovalMode": (frozenset({"type", "mode"}), frozenset()),
     "Interrupt": (frozenset({"type"}), frozenset({"reason"})),
     "CloseSession": (frozenset({"type"}), frozenset({"reason"})),
 }
@@ -61,6 +63,8 @@ def decode_command(value: Any) -> AgentCommand:
             return SubmitTask(command["text"])
         if command_type == "ApprovalResponse":
             return ApprovalResponse(command["request_id"], command["approved"])
+        if command_type == "SetApprovalMode":
+            return SetApprovalMode(command["mode"])
         if command_type == "Interrupt":
             return Interrupt(command.get("reason", "interrupted"))
         return CloseSession(command.get("reason", "session_closed"))
