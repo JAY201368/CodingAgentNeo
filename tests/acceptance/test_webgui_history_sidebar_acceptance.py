@@ -88,14 +88,30 @@ def test_history_sidebar_web_sources_stay_inside_browser_boundaries() -> None:
 
 def test_history_sidebar_readme_documents_resume_and_keeps_secrets_out() -> None:
     readme = README.read_text(encoding="utf-8")
+    folded = re.sub(r"\s+", " ", readme.casefold())
+    assert "only loads the history list" in folded
+    assert "does not automatically create or attach" in folded
+    assert "circular sidebar" in folded
+    assert "history item" in folded
     assert "resume_session_id" in readme
     assert "DELETE" in readme
+    assert "persisted" in folded and "hint" in folded
+    assert "session_end" in readme
+    assert "history projection" in folded
     assert "finite JSON" in readme or "有限 JSON" in readme
+    assert "scroll independently" in folded
+    assert "has no end session" in folded
+    assert "reconnect" in folded
+    assert "new-session buttons" in folded
     assert "one active transport session" in readme or "one linear transport session" in readme
     assert "does not recreate" in readme or "does not recreate a session automatically" in readme
-    assert "api key" in readme.casefold()
+    assert "api key" in folded
     assert "--api-key" in readme
     assert "or server-restart Web resume" not in readme
+    assert "a browser refresh only reconnects" not in folded
+    assert "automatically creates a session" not in folded
+    assert "end session button" not in folded
+    assert "reconnect events" not in folded
 
 
 def test_history_sidebar_tracked_tree_excludes_build_secrets_and_sessions() -> None:

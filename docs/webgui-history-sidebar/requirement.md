@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏需求
 
-> 状态：执行中（T01–T10 已验收；T11 尚未实施）
+> 状态：0.2 已交付（T01–T11 全部验收）
 > 日期：2026-09-02
 > 依赖前序工作流：[../web-frontend/](../web-frontend/)（Web 前端 T01–T10 已交付）、[../backend-history-discover/](../backend-history-discover/)（后端与适配层历史/恢复能力 T01–T06 已交付）
 > Agent 适配层规范（前端唯一接入权威）：[../agent-transport-interface.md](../agent-transport-interface.md)

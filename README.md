@@ -72,15 +72,21 @@ Web UI and stop each process separately with Ctrl+C. This two-process mode is
 for development and uses the same loopback-only Agent API as the composition
 launcher.
 
-The Web UI history sidebar lists resumable sessions for the configured
-workspace. Clicking an item ends the current transport session with `DELETE`,
-then creates a restored session whose body is exactly
-`{"resume_session_id":"..."}`. Historical messages are filled in from the
-finite JSON history-read endpoints; live SSE does not replay history. Only
-one transport session may be active. If resume fails after the current
-session was ended, the UI stays fail-closed and does not recreate a session
-automatically. Never commit an API key, a real session, a private path, or
-`web/dist`.
+Opening the Web GUI only loads the history list. The right pane stays
+blank; the browser does not automatically create or attach a transport
+session. Create a session from the circular sidebar button, or click a
+resumable history item. Replacement first DELETEs the known transport
+(including a persisted transport-ID hint) before a single POST: empty
+`{}` to create, or exactly `{"resume_session_id":"..."}` to resume.
+Historical `session_end` events belong only to the history projection
+and do not close the new live transport. Historical messages come from
+the finite JSON history-read endpoints; live SSE does not replay
+history. The sidebar and the main conversation pane scroll
+independently. The main pane has no End Session, reconnect, or
+new-session buttons. Only one transport session may be active. If
+resume fails after the current session was ended, the UI stays
+fail-closed and does not recreate a session automatically. Never commit
+an API key, a real session, a private path, or `web/dist`.
 
 For a same-origin local demonstration, build the Web assets and start the
 separate composition root:
@@ -128,12 +134,13 @@ The Web package targets Node.js 20+ and npm 10+.
 
 All modes are intended for one local user and one linear transport session;
 there is no remote/public deployment, authentication, multi-user control
-plane, or concurrent session. After a server or Agent-process restart, use the
-history sidebar to resume a workspace session through the finite history-read
-and `resume_session_id` create path described above; a browser refresh only
-reconnects a still-living transport session. The browser stores only an
-opaque transport ID and event cursor. It does not persist history session
-IDs, and it never receives an API key. `--api-key` is not a supported option.
+plane, or concurrent session. After a server or Agent-process restart, open
+the GUI to list history only, then choose a sidebar item or create a new
+session through the finite history-read and `resume_session_id` path
+described above. A browser refresh does not auto-create or attach. The
+browser stores only an opaque transport ID and event cursor. It does not
+persist history session IDs, and it never receives an API key. `--api-key`
+is not a supported option.
 Local `bash` inherits the launching user's permissions and is not an OS
 sandbox; review approval mode and workspace configuration before allowing
 commands.

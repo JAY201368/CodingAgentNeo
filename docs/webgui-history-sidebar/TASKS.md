@@ -1,6 +1,6 @@
 # CodingAgentNeo Web GUI 历史侧边栏任务分解
 
-> 状态：Executing 0.2 change（T01–T10 已验收；T11 未实施）
+> 状态：0.2 已交付（T01–T11 全部验收）
 > 架构依据：[ARCHITECTURE.md](ARCHITECTURE.md)
 > 前端唯一接入权威：[../agent-transport-interface.md](../agent-transport-interface.md)
 
@@ -215,7 +215,7 @@ flowchart TD
 
 **完成摘要（2026-09-02）：** `html/body/#app` 固定 viewport；sidebar 与 `.conversation-workspace__scroll` 各自 overflow。composer 改为右侧 in-flow 底栏。主 Agent 复跑 lint/type-check/`test`（149 passed）/build 通过。独立浏览器 1280×800：滚右 sidebar `{x:0,y:0,w:288,h:800}` `scrollTop` 不变；滚左 pane `scrollTop` 不变；无横向溢出。360×640：汉堡抽屉、自身可滚、Escape 焦点返回。未改状态机。
 
-### [ ] T11 — 聚合回归四个纠偏旅程并同步交付文档
+### [x] T11 — 聚合回归四个纠偏旅程并同步交付文档
 
 **依赖：** T10
 **范围：** 更新 `docs/webgui-history-sidebar/acceptance.md`、必要的 `web/` 聚合测试、`tests/acceptance/test_webgui_history_sidebar_acceptance.py` 与 `README.md`，把 T08–T10 的可观察旅程加入脚本化验收和运行说明；复跑相称 Web/Python/workflow 门并核对 secret、生成物、依赖边界。只修复 T08–T10 引入的集成缺陷，不新增产品能力或后端契约。
@@ -231,6 +231,8 @@ flowchart TD
 
 **验证：** `npm --prefix web run lint`；`npm --prefix web run type-check`；`npm --prefix web run test`；`npm --prefix web run build`；`.venv/bin/python -m pytest tests/acceptance -m acceptance`；`.venv/bin/python -m pytest`；`python /Users/jay/.codex/skills/orchestrate-spec-driven-development/scripts/validate_workflow.py --repo docs/webgui-history-sidebar`；secret/生成物/依赖扫描；`git diff --check`。
 
+**完成摘要（2026-09-02）：** `acceptance.md` 把 T08–T10 八条纠偏旅程映射到真实 Vitest 用例；README 改为打开 GUI 只列历史、侧边栏新建/选择、先 DELETE 已知 transport、history terminal 只属历史投影、左右独立滚动。主 Agent 复跑 Web lint/type-check/`test`（149 passed）/build；acceptance **59 passed**；全量 pytest **347 passed**；workflow validator 11 tasks OK。未跑真实模型/真实浏览器 resume。
+
 ## 推荐顺序
 
-T01–T10 已验收。继续派发 T11；使用全新专用 subagent，主 Agent 独立验收后才勾选。
+T01–T11 全部验收。0.2 纠偏里程碑完成。无未实施任务。

@@ -12,9 +12,17 @@
 - T08 — 隔离历史 hydration 与 live transport 生命周期：`createNewSession()` 与 `resumeSession()` 共用 `lifecycleBusy` 锁；先 DELETE 已知 transport（含未 attach 的持久化 hint）再唯一 POST；历史 envelopes 走 `HYDRATE_EVENT`，旧 `session_end`/`INTERRUPTED` 不关闭或遗忘新 live transport。2026-09-02 主 Agent 复跑 lint/type-check/`test -- src/composables src/domain`（83 passed）/build/`git diff --check` 通过。未改 App/侧边栏/CSS。
 - T09 — 侧边栏驱动的 idle / 新建 / resume：删除 App `autoConnect`；首屏只拉历史列表，右侧空白。圆形「新建 session」接到 `createNewSession()`，历史项接到 `resumeSession()`；主区无结束/重连/新建按钮。2026-09-02 主 Agent 复跑 lint/type-check/`test -- src/App.spec.ts src/components`（50 passed）/build 通过。独立浏览器：idle 主区空白、侧栏圆形 +、无主区 lifecycle 按钮。
 - T10 — 固定 viewport shell 与左右独立滚动：document/body 不再主滚动；sidebar 与右侧消息区各自 overflow；composer 为右侧 in-flow 底栏。2026-09-02 主 Agent 复跑 lint/type-check/`test`（149 passed）/build 通过。独立浏览器 1280×800 左右独立滚动无横向溢出；360×640 抽屉自身可滚、Escape 焦点返回。
+- T11 — 聚合回归四个纠偏旅程并同步交付文档：`acceptance.md` 映射 T08–T10 八条旅程到真实 Vitest；README 改为打开 GUI 只列历史、侧边栏新建/选择、先 DELETE 已知 transport、history terminal 只属历史投影、左右独立滚动。2026-09-02 主 Agent 复跑 Web 149 passed、acceptance 59 passed、全量 pytest 347 passed、workflow validator 11 tasks OK。未跑真实模型/真实浏览器 resume。
 
 ## Current State
 
+- T01–T11 全部验收。0.2 纠偏已落地并可运行：
+  - 打开 GUI 只加载历史列表，右侧空白，不自动 create/attach。
+  - 侧边栏圆形新建与历史选择共用 replacement：先 DELETE 已知 transport，再唯一 POST。
+  - 历史 `session_end`/`INTERRUPTED` 只重建 timeline，不关闭新 live transport。
+  - 桌面左右独立滚动；主区无结束/重连/新建按钮。
+  - 对照见 [acceptance.md](acceptance.md)。README 与静态扫描描述同一完成态。
+  - 主 Agent 复跑（2026-09-02）：Web lint/type-check/`test` **149 passed**/build；Python acceptance **59 passed**；全量 pytest **347 passed**；workflow validator 11 tasks OK。未声称真实模型网关、真实浏览器 resume 或公网通过。
 - T10 已验收。可观察行为：
   - `html, body, #app` 固定 viewport（`height: 100%` / `max-height: 100dvh`，`overflow: hidden`）。document/body 不再是长会话主滚动。
   - 桌面 sidebar 与 `.conversation-workspace__scroll` 各自 `overflow: auto`；滚右不带动 sidebar `scrollTop`/rect，滚左不带动右侧 `scrollTop`。
@@ -27,20 +35,7 @@
     - **360×640** 关闭：无横向溢出；汉堡「历史」；sidebar `x=-288` / inert / hidden。打开：`x=0` 自身可滚（`scrollTop=400`、document 0），shell inert，标题在汉堡下方。Escape 关闭且焦点回「打开历史」。
 - T09 已验收。首屏 idle、侧边栏新建/resume、主区无 lifecycle 按钮。
 - T08 已验收。hydration/live 隔离与统一 replacement 由 composable/reducer 提供。
-- T11 未开始。未声称真实模型网关或真实 resume 端到端通过。
-  - scripted Web 旅程由既有 Vitest 覆盖，对照见 [acceptance.md](acceptance.md)；T07 仅补 App 级分页接线（`lists history and pages with the opaque next_cursor`）。
-  - README Local runtime 说明侧边栏列出当前 workspace 可 resume session；点击先 DELETE 当前 transport session，再以 `resume_session_id` 创建；历史由有限 JSON 读取补齐，SSE 不 replay；单活跃 session；失败不自动重建；不提交 API Key。
-  - 静态边界：`web/src` 无 `v-html`、无 Python import、仅 `client.ts` 调用 `fetch(`；localStorage 只经 `savePersistedTransportSession` 写 transport ID/cursor。T04 spec 曾把字面量 `v-html` 写进断言，导致既有 T10 全源码扫描失败；已改为 `'v-' + 'html'` 拼接，产品代码未使用该指令。
-  - Worker 验证（2026-09-02）：
-    - `npm --prefix web run lint` 通过
-    - `npm --prefix web run type-check` 通过
-    - `npm --prefix web run test` **124 passed**
-    - `npm --prefix web run build` 通过
-    - `.venv/bin/python -m pytest` **346 passed / 1 failed**（`tests/integration/test_resume_cli.py::test_main_corrupt_session_is_startup_failure`）。失败原因是仓库根目录被 gitignore 的 `.coding-agent-neo.toml` 仍含已移除的 `session_dir`，CLI 读到 unknown option 返回 EXIT_CONFIG(2)。`CODING_AGENT_NEO_CONFIG` 指向不存在文件时该用例通过。非本工作流引入，未改 Python。仅有第三方 StarletteDeprecationWarning。
-    - `.venv/bin/python -m pytest tests/acceptance -m acceptance` **59 passed**（含新增 3 项静态扫描）
-    - workflow validator：`docs/webgui-history-sidebar` 7 tasks OK；`.codex` 同路径亦 OK；前序 `docs/baseline` 14、`docs/web-frontend` 10、`docs/backend-history-discover` 6 均 OK
-    - `git diff --check` 通过；git tracked 无 `web/dist`、`node_modules`、`.env`、真实 session
-  - 不勾选 TASKS。未执行真实模型网关或真实浏览器 resume。
+- T07 已验收。scripted 对照见当时 [acceptance.md](acceptance.md)；T11 已把该表更新为 T09 改名后的真实用例，并追加 T08–T10 纠偏旅程。
 - T06 已验收。可观察行为：
   - 桌面（≥641px）：侧边栏占文档流 18rem，汉堡不渲染；主区在侧边栏右侧居中；composer `left: var(--sidebar-width)`。
   - 窄屏（≤640px）：侧边栏默认移出文档流（overlay）；「历史」按钮 `aria-controls="history-sidebar"`；打开后滑入（reduced-motion 下近乎瞬间）、半透明遮罩点击关闭、Escape 关闭并焦点回到按钮；主区 `.app-shell` `inert`。选择 session 后关闭抽屉。状态不写 localStorage。
@@ -82,8 +77,8 @@
 - 视觉「参考 Codex 设计」为方向性描述；T06 已落地 640px overlay 抽屉、紫金信息层级与人工 1280/360 证据。南大金色仍为产品可访问 token，非校方官方 HEX。
 - 真实模型网关、真实浏览器端到端 resume 与公网部署不在本轮执行；相关证据只能标注为离线/脚本化，不得冒充真实验证。T06 的 1280/360 布局检查不替代 resume 状态机证据。
 - 浏览器 `since` 只能精确表示 `Number.MAX_SAFE_INTEGER`（2^53-1）以内的整数，是 wire `0..2^63-1` 的 JS 安全子集；超出安全整数的值在发请求前按 `invalid_history_cursor` 拒绝。
-- 本机被 gitignore 的 `.coding-agent-neo.toml` 仍含已移除的 `session_dir`，会使部分 CLI `main()` 测试在未设置 `CODING_AGENT_NEO_CONFIG` 时读到 unknown option。不在本工作流修复范围。
+- 本机被 gitignore 的 `.coding-agent-neo.toml` **可能**仍含已移除的 `session_dir`，会使 `tests/integration/test_resume_cli.py::test_main_corrupt_session_is_startup_failure` 在未隔离 `CODING_AGENT_NEO_CONFIG` 时读到 unknown option 并返回 EXIT_CONFIG(2)。T11 本次全量 pytest **未复现**（本机该文件当前无 `session_dir`，347 passed）。不在本工作流修复范围，未改 Python。
 
 ## Next Recommended Task
 
-- T11 — 聚合回归四个纠偏旅程并同步交付文档。依赖 T10 已验收。
+- 无未实施任务。0.2 纠偏里程碑已验收。

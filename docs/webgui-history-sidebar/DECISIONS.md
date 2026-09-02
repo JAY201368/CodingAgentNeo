@@ -121,3 +121,9 @@
 - 选择：`html, body, #app` 固定为 `height: 100% / max-height: 100dvh` 且 `overflow: hidden`。桌面 `.app-layout` 占满 viewport；sidebar 与 `.app-main` 各自 `min-height: 0`。右侧把 timeline/message-tail 放进 `.conversation-workspace__scroll`（`overflow: auto`），composer 作为 `.conversation-workspace` 的 in-flow 底部栏（`position: relative`），不再使用 `position: fixed; left: var(--sidebar-width)`。sidebar 子项 `flex-shrink: 0`，避免长列表被 flex 压扁而不出现独立滚动。圆形新建按钮保持 2.25rem 紫金圆，disabled 用 opacity + dashed border，不只靠颜色。
 - 理由与替代：viewport-fixed composer 在左右独立滚动后会错位或盖住最后一条消息。sticky footer 对“内容在 composer 之上结束”的几何更脆。flex 列把消息滚动和输入栏拆开，最后一条消息可以滚到 composer 上方。sidebar 若允许子项收缩，长历史在 1280×800 实测 `scrollHeight === clientHeight`。
 - 后果：jsdom 不能替代真实几何；Vitest 打开 `css: true` 以便断言 overflow/position/圆形按钮 computed style。窄屏仍用 640px overlay 抽屉，关闭 inert、打开后抽屉自身滚动。
+
+## 2026-09-02 — T11：纠偏旅程继续映射既有 Vitest，不新增第二套协议
+
+- 选择：T11 把 T08–T10 的八条可观察旅程映射到仓库里已存在的 App / composable / reducer 用例名；修正 T07 对照表里被 T09 改名的过时标题（例如 `resumes the selected history session...` → `resumes a history item...`）。不新增 Web 聚合 Vitest、Playwright 真模型旅程或 Python live Web UI 测试。Python `test_webgui_history_sidebar_acceptance.py` 只扩展 README 静态断言（首屏只列历史、侧边栏新建/选择、history terminal 属历史投影、左右独立滚动、主区无结束/重连/新建按钮），并拒绝仍描述「打开即自动创建 / 刷新自动 attach / 右侧手动结束」的过时措辞。
+- 理由与替代：T07 已决定 scripted 验收以既有 Vitest 为权威。T08–T10 已在对应 spec 里覆盖 idle、replacement、INTERRUPTED 隔离、再次 replacement 与独立滚动；再写一套 App 级串联会复制协议而不增加新证据。替代方案是 Playwright 真浏览器 resume，本轮用户未提供未入库环境。
+- 后果：acceptance / README / 静态扫描描述同一 0.2 完成态。未运行的真实模型/真实浏览器/公网必须保持未声称。
